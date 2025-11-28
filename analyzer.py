@@ -48,10 +48,11 @@ def extract_financial_data(pdf_path):
         data = extract_from_text(full_text)
         if data and data.get('revenue', 0) > 0:
             print("Successfully extracted data from text.")
-import pdfplumber
-import re
-import pandas as pd
-import math
+import logging
+
+# Configure Logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def extract_financial_data(pdf_path):
     """
@@ -59,49 +60,128 @@ def extract_financial_data(pdf_path):
     Returns a dictionary with extracted metrics.
     """
     extracted_data = {}
+    logger.info(f"Analyzing PDF: {pdf_path}")
     
     with pdfplumber.open(pdf_path) as pdf:
-        print(f"Analyzing PDF: {pdf_path}")
+        # Strategy 1: Smart Table Selection
+        # Scan ALL pages and ALL tables, score them, and pick the best one.
+        candidates = [] # List of (score, page_idx, table_df)
         
-        # Strategy 1: Table Extraction with Text Strategy (Robust for this PDF)
         for i, page in enumerate(pdf.pages):
-            # Use text strategy to handle complex layouts/interleaving
-            tables = page.extract_tables(table_settings={
-                "vertical_strategy": "text", 
-                "horizontal_strategy": "text",
-                "snap_tolerance": 5
-            })
+            logger.info(f"Scanning Page {i+1} for tables...")
+            try:
+                tables = page.extract_tables(table_settings={
+                    "vertical_strategy": "text", 
+                    "horizontal_strategy": "text",
+                    "snap_tolerance": 5
+                })
+            except Exception as e:
+                logger.warning(f"Failed to extract tables from Page {i+1}: {e}")
+                continue
             
             for table in tables:
                 df = pd.DataFrame(table).fillna('')
-                
                 # Clean up
                 df = df.dropna(how='all').dropna(axis=1, how='all')
                 
-                # Check for financial keywords in the raw table (multiline)
-                df_str = df.astype(str)
-                row_text = df_str.apply(lambda x: ' '.join(x), axis=1).str.lower()
-                
-                if row_text.str.contains('revenue|sales|income from operations').any() and \
-                   row_text.str.contains('profit|loss').any():
-                    print(f"Page {i+1}: Found Financial Table via Text Strategy")
-                    data = process_financial_table(df)
-                    if data and data.get('table_data') and data['table_data'][0].get('revenue', 0) > 0:
-                        return data
+                score = score_table(df, page_idx=i+1)
+                if score > 10: # Lower threshold to capture more candidates
+                    candidates.append((score, i+1, df))
+                    logger.info(f"Found candidate table on Page {i+1} with Score: {score}")
+
+        # Sort candidates by score (descending)
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        
+        logger.info(f"Found {len(candidates)} candidate tables. Processing in order of score...")
+        
+        for score, page_idx, df in candidates:
+            logger.info(f"Attempting to process table from Page {page_idx} (Score: {score})")
+            data = process_financial_table(df)
+            if data and data.get('table_data') and data['table_data'][0].get('revenue', 0) > 0:
+                logger.info(f"Successfully extracted data from Page {page_idx}.")
+                return data
+            else:
+                logger.warning(f"Table from Page {page_idx} failed processing or had zero revenue.")
 
         # Strategy 2: Text-Based Extraction (Fallback)
-        print("Table extraction failed. Attempting text-based extraction...")
+        logger.warning("Table extraction failed or yielded no data. Attempting text-based extraction...")
         full_text = ""
         for page in pdf.pages:
             full_text += page.extract_text() + "\n"
             
         data = extract_from_text(full_text)
         if data and data.get('revenue', 0) > 0:
-            print("Successfully extracted data from text.")
-            return data
+            logger.info("Successfully extracted data from text.")
+            wrapped_data = {
+                'table_data': [{'period': 'Current', **data}],
+                'growth': {},
+                'observations': ["⚠️ Extracted from text. Comparison data unavailable."],
+                'recommendation': generate_recommendation(data, [])
+            }
+            return wrapped_data
 
-    print("No valid financial data found.")
+    logger.error("No valid financial data found.")
     return extracted_data
+
+def score_table(df, page_idx=0):
+    """
+    Scores a dataframe based on its likelihood of being the Financial Results table.
+    """
+    score = 0
+    df_str = df.astype(str).apply(lambda x: x.str.lower())
+    text_content = " ".join(df_str.values.flatten())
+    
+    # CRITICAL: Prioritize Consolidated over Standalone
+    if 'consolidated' in text_content:
+        score += 50
+        logger.info(f"Page {page_idx}: CONSOLIDATED results detected (+50 bonus)")
+    elif 'standalone' in text_content:
+        score -= 20
+        logger.info(f"Page {page_idx}: Standalone results detected (-20 penalty)")
+    
+    # Keyword Scoring
+    keywords = {
+        'revenue': 10, 'sales': 10, 'income from operations': 15,
+        'profit': 10, 'loss': 10, 'net profit': 20,
+        'expenses': 10, 'expenditure': 10,
+        'tax': 5, 'eps': 10, 'earnings per share': 15,
+        'quarter': 5, 'ended': 5
+    }
+    
+    for kw, points in keywords.items():
+        if kw in text_content:
+            score += points
+            
+    # Structure Scoring
+    # 1. Must have multiple columns (Particulars + Data)
+    if df.shape[1] < 2:
+        return 0
+        
+    # 2. Numeric Density: Check if columns 1+ contain mostly numbers
+    numeric_cols = 0
+    for col in df.columns[1:]:
+        numeric_count = 0
+        total_count = 0
+        for val in df[col]:
+            val_str = str(val).strip()
+            if not val_str: continue
+            total_count += 1
+            # Check if it looks like a number (allow commas, brackets)
+            clean = val_str.replace(',', '').replace('(', '').replace(')', '')
+            try:
+                float(clean)
+                numeric_count += 1
+            except: pass
+            
+        if total_count > 0 and (numeric_count / total_count) > 0.4:
+            numeric_cols += 1
+            
+    if numeric_cols > 0:
+        score += (numeric_cols * 5)
+    else:
+        score -= 20
+        
+    return score
 
 def process_financial_table(df):
     """Process dataframe to extract metrics for multiple periods."""
@@ -111,7 +191,8 @@ def process_financial_table(df):
     particulars_col_idx = -1
     for i, col in enumerate(df.columns):
         col_text = " ".join(df[col].astype(str)).lower()
-        if 'revenue' in col_text or 'profit' in col_text or 'expenses' in col_text:
+        # Added 'particulars' to be more robust based on user screenshot
+        if 'particulars' in col_text or 'revenue' in col_text or 'profit' in col_text or 'expenses' in col_text:
             particulars_col_idx = i
             break
             
@@ -143,7 +224,7 @@ def process_financial_table(df):
             
     if not data_col_indices: return None
 
-    print(f"Using Particulars Col: {particulars_col_idx}, Data Cols: {data_col_indices}")
+    logger.info(f"Using Particulars Col: {particulars_col_idx}, Data Cols: {data_col_indices}")
 
     # Helper to find value in a specific column
     def find_val(keywords, col_idx):

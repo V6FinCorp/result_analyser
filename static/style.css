@@ -109,6 +109,34 @@ header p {
     font-size: 1rem;
 }
 
+.api-key-section {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+#api-key-input {
+    width: 100%;
+    padding: 1rem;
+    background-color: var(--bg-color);
+    border: 1px solid var(--primary);
+    border-radius: 0.5rem;
+    color: var(--text-main);
+    font-size: 1rem;
+    font-family: monospace;
+}
+
+#api-key-input::placeholder {
+    color: var(--text-muted);
+}
+
+.api-key-note {
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--warning);
+    text-align: center;
+}
+
 #analyze-btn {
     width: 100%;
     margin-top: 1.5rem;

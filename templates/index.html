@@ -33,6 +33,11 @@
                 <input type="text" id="url-input" placeholder="Paste BSE/NSE PDF URL here...">
             </div>
 
+            <div class="api-key-section">
+                <input type="password" id="api-key-input" placeholder="Enter OpenAI API Key (sk-...)">
+                <p class="api-key-note">⚠️ Your API key is never stored and only used for this analysis</p>
+            </div>
+
             <button id="analyze-btn" onclick="analyzeStock()">Analyze Result</button>
         </div>
 
@@ -42,16 +47,12 @@
         </div>
 
         <div id="result-section" class="hidden">
-            <!-- Recommendation Card -->
             <div class="recommendation-card" id="rec-card">
                 <h2 id="verdict">BUY / SELL</h2>
-                <ul id="reasons-list">
-                    <!-- Reasons will be populated here -->
-                </ul>
+                <ul id="reasons-list"></ul>
             </div>
 
             <div class="report-container">
-                <!-- 1. Quarterly Financial Comparison Table -->
                 <div class="section-box">
                     <h3>Quarterly Financial Comparison (₹ Lakhs)</h3>
                     <div class="table-responsive">
@@ -59,30 +60,21 @@
                             <thead>
                                 <tr>
                                     <th>Particulars</th>
-                                    <!-- Headers will be populated dynamically -->
                                 </tr>
                             </thead>
-                            <tbody>
-                                <!-- Rows will be populated dynamically -->
-                            </tbody>
+                            <tbody></tbody>
                         </table>
                     </div>
                 </div>
 
-                <!-- 2. Growth Analysis -->
                 <div class="section-box">
                     <h3>Growth Analysis</h3>
-                    <div class="growth-grid" id="growth-section">
-                        <!-- Populated by JS -->
-                    </div>
+                    <div class="growth-grid" id="growth-section"></div>
                 </div>
 
-                <!-- 3. Key Observations -->
                 <div class="section-box">
                     <h3>Key Observations</h3>
-                    <ul class="observations-list" id="observations-list">
-                        <!-- Populated by JS -->
-                    </ul>
+                    <ul class="observations-list" id="observations-list"></ul>
                 </div>
             </div>
         </div>
@@ -90,8 +82,8 @@
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <footer>
-        <p style="text-align: center; margin-top: 2rem; color: #64748b; font-size: 0.8rem;">Stock Analyzer v1.3 - Full
-            Report Generation</p>
+        <p style="text-align: center; margin-top: 2rem; color: #64748b; font-size: 0.8rem;">Stock Analyzer v2.0 -
+            AI-Powered Analysis</p>
     </footer>
 </body>
 

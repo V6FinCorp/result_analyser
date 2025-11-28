@@ -50,12 +50,27 @@ async function analyzeStock() {
     const resultSection = document.getElementById('result-section');
     const analyzeBtn = document.getElementById('analyze-btn');
 
-    // Reset UI
     resultSection.classList.add('hidden');
     loading.classList.remove('hidden');
     analyzeBtn.disabled = true;
 
     const formData = new FormData();
+
+    // Get API key
+    const apiKey = document.getElementById('api-key-input').value.trim();
+    if (!apiKey) {
+        alert("Please enter your OpenAI API key.");
+        resetUI();
+        return;
+    }
+
+    if (!apiKey.startsWith('sk-')) {
+        alert("Invalid API key format. OpenAI keys start with 'sk-'");
+        resetUI();
+        return;
+    }
+
+    formData.append('api_key', apiKey);
 
     if (document.getElementById('upload-tab').classList.contains('active')) {
         if (!fileInput.files.length) {
@@ -104,25 +119,13 @@ function displayResult(data) {
     const resultSection = document.getElementById('result-section');
     resultSection.classList.remove('hidden');
 
-    // 1. Recommendation Card
     const rec = data.recommendation;
     const verdict = document.getElementById('verdict');
-    const reasonsList = document.getElementById('reasons-list');
-
     verdict.textContent = rec.verdict;
-    verdict.className = rec.color; // green, orange, red
+    verdict.className = rec.color;
 
-    // We don't populate reasons list here anymore, as we have a dedicated Observations section
-    // But we can show the top reason if needed, or just clear it
-    reasonsList.innerHTML = '';
-
-    // 2. Render Comparison Table
     renderTable(data.table_data);
-
-    // 3. Render Growth Analysis
     renderGrowth(data.growth);
-
-    // 4. Render Observations
     renderObservations(data.observations);
 }
 
@@ -131,20 +134,17 @@ function renderTable(tableData) {
     const thead = table.querySelector('thead tr');
     const tbody = table.querySelector('tbody');
 
-    // Clear existing
     thead.innerHTML = '<th>Particulars</th>';
     tbody.innerHTML = '';
 
     if (!tableData || tableData.length === 0) return;
 
-    // Create Headers
     tableData.forEach(col => {
         const th = document.createElement('th');
         th.textContent = col.period;
         thead.appendChild(th);
     });
 
-    // Define Rows to display
     const metrics = [
         { key: 'revenue', label: 'Revenue from Operations' },
         { key: 'other_income', label: 'Other Income' },
@@ -158,25 +158,20 @@ function renderTable(tableData) {
 
     metrics.forEach(metric => {
         const tr = document.createElement('tr');
-
-        // Label Cell
         const tdLabel = document.createElement('td');
         tdLabel.innerHTML = `<strong>${metric.label}</strong>`;
         tr.appendChild(tdLabel);
 
-        // Data Cells
         tableData.forEach(col => {
             const td = document.createElement('td');
             let val = col[metric.key];
 
             if (metric.isPercent) {
                 td.textContent = val.toFixed(1) + '%';
-                // Color code OPM
                 if (val < 0) td.style.color = '#ef4444';
                 else if (val > 20) td.style.color = '#22c55e';
             } else {
                 td.textContent = val.toLocaleString('en-IN');
-                // Color code Profit
                 if ((metric.key === 'operating_profit' || metric.key === 'net_profit') && val < 0) {
                     td.style.color = '#ef4444';
                     td.textContent = `(${Math.abs(val).toLocaleString('en-IN')})`;
@@ -205,14 +200,9 @@ function renderGrowth(growth) {
     items.forEach(item => {
         const div = document.createElement('div');
         div.className = 'growth-item';
-
         const arrow = item.val >= 0 ? '⬆️' : '⬇️';
         const color = item.val >= 0 ? '#22c55e' : '#ef4444';
-
-        div.innerHTML = `
-            <h4>${item.label}</h4>
-            <p style="color: ${color}">${arrow} ${Math.abs(item.val).toFixed(1)}%</p>
-        `;
+        div.innerHTML = `<h4>${item.label}</h4><p style="color: ${color}">${arrow} ${Math.abs(item.val).toFixed(1)}%</p>`;
         container.appendChild(div);
     });
 }
@@ -228,7 +218,6 @@ function renderObservations(observations) {
 
     observations.forEach(obs => {
         const li = document.createElement('li');
-        // Convert markdown bold to html bold
         const htmlObs = obs.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         li.innerHTML = htmlObs;
         list.appendChild(li);

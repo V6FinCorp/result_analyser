@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify
 import os
 from werkzeug.utils import secure_filename
-from analyzer import extract_financial_data, generate_recommendation
+from analyzer import extract_financial_data
 from browser_utils import download_pdf_from_url
 
 app = Flask(__name__)
@@ -44,12 +44,8 @@ def analyze():
         if not data:
             return jsonify({'error': 'Could not extract financial data from the PDF'}), 400
             
-        recommendation = generate_recommendation(data)
-        
-        return jsonify({
-            'data': data,
-            'recommendation': recommendation
-        })
+        # Data now contains table_data, growth, observations, and recommendation
+        return jsonify(data)
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

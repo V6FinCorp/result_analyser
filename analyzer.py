@@ -48,34 +48,66 @@ def extract_financial_data(pdf_path):
         data = extract_from_text(full_text)
         if data and data.get('revenue', 0) > 0:
             print("Successfully extracted data from text.")
+import pdfplumber
+import re
+import pandas as pd
+import math
+
+def extract_financial_data(pdf_path):
+    """
+    Extracts financial data from a PDF file.
+    Returns a dictionary with extracted metrics.
+    """
+    extracted_data = {}
+    
+    with pdfplumber.open(pdf_path) as pdf:
+        print(f"Analyzing PDF: {pdf_path}")
+        
+        # Strategy 1: Table Extraction with Text Strategy (Robust for this PDF)
+        for i, page in enumerate(pdf.pages):
+            # Use text strategy to handle complex layouts/interleaving
+            tables = page.extract_tables(table_settings={
+                "vertical_strategy": "text", 
+                "horizontal_strategy": "text",
+                "snap_tolerance": 5
+            })
+            
+            for table in tables:
+                df = pd.DataFrame(table).fillna('')
+                
+                # Clean up
+                df = df.dropna(how='all').dropna(axis=1, how='all')
+                
+                # Check for financial keywords in the raw table (multiline)
+                df_str = df.astype(str)
+                row_text = df_str.apply(lambda x: ' '.join(x), axis=1).str.lower()
+                
+                if row_text.str.contains('revenue|sales|income from operations').any() and \
+                   row_text.str.contains('profit|loss').any():
+                    print(f"Page {i+1}: Found Financial Table via Text Strategy")
+                    data = process_financial_table(df)
+                    if data and data.get('table_data') and data['table_data'][0].get('revenue', 0) > 0:
+                        return data
+
+        # Strategy 2: Text-Based Extraction (Fallback)
+        print("Table extraction failed. Attempting text-based extraction...")
+        full_text = ""
+        for page in pdf.pages:
+            full_text += page.extract_text() + "\n"
+            
+        data = extract_from_text(full_text)
+        if data and data.get('revenue', 0) > 0:
+            print("Successfully extracted data from text.")
             return data
 
     print("No valid financial data found.")
     return extracted_data
 
 def process_financial_table(df):
-    """Process dataframe to extract metrics."""
+    """Process dataframe to extract metrics for multiple periods."""
     df = df.astype(str)
     
-    # Find data column (first column with >3 numbers)
-    # Note: Cells are multiline, so we need to check content
-    data_col_idx = -1
-    for col in df.columns[1:]:
-        numeric_count = 0
-        for val in df[col]:
-            # Check if any line in the cell is a number
-            lines = str(val).split('\n')
-            for line in lines:
-                clean = line.replace(',', '').replace('(', '-').replace(')', '').strip()
-                try:
-                    float(clean)
-                    numeric_count += 1
-                except: pass
-        if numeric_count > 3:
-            data_col_idx = col
-            break
-            
-    # Identify Particulars Column (contains keywords)
+    # Identify Particulars Column
     particulars_col_idx = -1
     for i, col in enumerate(df.columns):
         col_text = " ".join(df[col].astype(str)).lower()
@@ -84,20 +116,41 @@ def process_financial_table(df):
             break
             
     if particulars_col_idx == -1:
-        # Fallback: Use column 0 or 1 depending on content length
-        # Usually Particulars is the widest text column
         lengths = df.apply(lambda x: x.str.len().mean())
         particulars_col_idx = lengths.idxmax()
 
-    print(f"Using Column {data_col_idx} for Data and Column {particulars_col_idx} for Particulars")
+    # Identify Data Columns (All columns with >3 numbers, excluding Sr No)
+    data_col_indices = []
+    for i, col in enumerate(df.columns):
+        if i == particulars_col_idx: continue
+        
+        numeric_values = []
+        for val in df[col]:
+            lines = str(val).split('\n')
+            for line in lines:
+                clean = line.replace(',', '').replace('(', '-').replace(')', '').strip()
+                try:
+                    val_float = float(clean)
+                    numeric_values.append(val_float)
+                except: pass
+        
+        if len(numeric_values) > 3:
+            # Heuristic to filter out Sr No column:
+            # If max value is small (< 50) and all are integers, it's likely an index
+            if max(numeric_values) < 50 and all(v.is_integer() for v in numeric_values):
+                continue
+            data_col_indices.append(i)
+            
+    if not data_col_indices: return None
 
-    def find_val(keywords):
+    print(f"Using Particulars Col: {particulars_col_idx}, Data Cols: {data_col_indices}")
+
+    # Helper to find value in a specific column
+    def find_val(keywords, col_idx):
         for _, row in df.iterrows():
-            # Check Particulars column
             cell_text = str(row[particulars_col_idx])
             lines = cell_text.split('\n')
             
-            # Find which line matches the keyword
             match_line_idx = -1
             for idx, line in enumerate(lines):
                 if any(k.lower() in line.lower() for k in keywords):
@@ -105,43 +158,107 @@ def process_financial_table(df):
                     break
             
             if match_line_idx != -1:
-                # Found keyword at line `match_line_idx`
-                print(f"DEBUG: Found keyword '{keywords[0]}' at line {match_line_idx} in text: {lines[match_line_idx]}")
-                
-                # Get value cell
-                val_cell = str(row[data_col_idx])
+                val_cell = str(row[col_idx])
                 val_lines = val_cell.split('\n')
-                val_lines = [l.strip() for l in val_lines if l.strip()] # Remove empty lines
-                
-                print(f"DEBUG: Value lines: {val_lines}")
+                val_lines = [l.strip() for l in val_lines if l.strip()]
                 
                 if not val_lines: continue
-                
-                # Proportional Mapping
-                # value_index = floor( text_index * (len(value) / len(text)) )
-                # We use len(lines) as text length
-                
                 if len(lines) == 0: continue
                 
-                # Calculate target index
                 ratio = len(val_lines) / len(lines)
                 target_idx = math.floor(match_line_idx * ratio)
-                
-                # Clamp index
                 target_idx = min(target_idx, len(val_lines) - 1)
                 target_idx = max(target_idx, 0)
                 
                 val_str = val_lines[target_idx]
-                print(f"DEBUG: Mapped to index {target_idx}, value: {val_str}")
-                
                 try:
                     clean_val = val_str.replace(',', '').replace('(', '-').replace(')', '').strip()
                     return float(clean_val)
                 except: continue
-                
         return 0.0
 
-    return calculate_metrics(find_val)
+    # Extract for all identified columns (up to 4: Current, Prev, YoY, YearEnd)
+    periods = ['Current', 'Prev Qtr', 'YoY Qtr', 'Year Ended']
+    extracted_results = []
+    
+    for i, col_idx in enumerate(data_col_indices[:4]):
+        period_name = periods[i] if i < len(periods) else f"Period {i+1}"
+        
+        revenue = find_val(['Revenue from Operations', 'Income from Operations', 'Total Revenue'], col_idx)
+        if revenue < 1.0: revenue = find_val(['Total Income'], col_idx)
+        
+        other_income = find_val(['Other Income'], col_idx)
+        total_expenses = find_val(['Total Expenses', 'Total Expenditure'], col_idx)
+        pbt = find_val(['Profit before Tax', 'Profit / (Loss) before Tax', 'Profit Before Exceptional'], col_idx)
+        net_profit = find_val(['Net Profit', 'Profit for the period', 'Profit after Tax', 'Profit / (Loss) for the period', 'Profi/'], col_idx)
+        eps = find_val(['Earnings Per Share', 'EPS', 'Basic'], col_idx)
+        
+        operating_profit = revenue - total_expenses
+        opm = (operating_profit / revenue * 100) if revenue > 0 else 0
+        
+        extracted_results.append({
+            'period': period_name,
+            'revenue': revenue,
+            'other_income': other_income,
+            'total_expenses': total_expenses,
+            'operating_profit': operating_profit,
+            'opm': opm,
+            'pbt': pbt,
+            'net_profit': net_profit,
+            'eps': eps
+        })
+
+    return analyze_results(extracted_results)
+
+def analyze_results(results):
+    """Analyze the extracted multi-period data to generate insights."""
+    if not results: return {}
+    
+    current = results[0]
+    prev = results[1] if len(results) > 1 else None
+    yoy = results[2] if len(results) > 2 else None
+    
+    # Growth Calculation
+    growth = {}
+    if prev:
+        growth['revenue_qoq'] = ((current['revenue'] - prev['revenue']) / prev['revenue'] * 100) if prev['revenue'] else 0
+        growth['net_profit_qoq'] = ((current['net_profit'] - prev['net_profit']) / prev['net_profit'] * 100) if prev['net_profit'] else 0
+    
+    if yoy:
+        growth['revenue_yoy'] = ((current['revenue'] - yoy['revenue']) / yoy['revenue'] * 100) if yoy['revenue'] else 0
+        growth['net_profit_yoy'] = ((current['net_profit'] - yoy['net_profit']) / yoy['net_profit'] * 100) if yoy['net_profit'] else 0
+        
+    # Generate Observations
+    observations = []
+    
+    # 1. Operating Profit Check
+    if current['operating_profit'] < 0:
+        observations.append(f"🚨 **CRITICAL RED FLAG: Operating Loss** of {current['operating_profit']:.2f} Lakhs. Core business is bleeding.")
+    
+    # 2. OPM Check
+    if current['opm'] < 0:
+        observations.append(f"⚠️ **Margin Collapse:** Operating Profit Margin (OPM) is negative at {current['opm']:.1f}%.")
+    elif yoy and current['opm'] < yoy['opm']:
+        observations.append(f"⚠️ **Margin Compression:** OPM fell to {current['opm']:.1f}% from {yoy['opm']:.1f}% YoY.")
+        
+    # 3. Other Income Dependency
+    if current['net_profit'] > 0 and current['operating_profit'] < 0:
+        observations.append(f"⚠️ **Masked Earnings:** Net Profit is positive only due to Other Income ({current['other_income']:.2f}).")
+        
+    # 4. Revenue Growth
+    if growth.get('revenue_qoq', 0) < -10:
+        observations.append(f"📉 **Revenue Collapse:** Revenue crashed {growth['revenue_qoq']:.1f}% QoQ.")
+        
+    # 5. Expense Check
+    if yoy and current['total_expenses'] > yoy['total_expenses'] and current['revenue'] < yoy['revenue']:
+        observations.append("⚠️ **Expense Mismanagement:** Expenses increased YoY while Revenue declined.")
+
+    return {
+        'table_data': results,
+        'growth': growth,
+        'observations': observations,
+        'recommendation': generate_recommendation(current, observations)
+    }
 
 def extract_from_text(text):
     """Parse raw text to find financial metrics."""
@@ -194,35 +311,30 @@ def calculate_metrics(finder_func):
         'eps': eps
     }
 
-def generate_recommendation(data):
-    """Generates investment recommendation."""
-    reasons = []
+def generate_recommendation(data, observations):
+    """Generates investment recommendation based on data and observations."""
     score = 0
+    reasons = []
     
-    if data['operating_profit'] < 0:
-        reasons.append(f"CRITICAL: Operating Loss of {data['operating_profit']:.2f}")
-        score -= 5
-    elif data['opm'] < 10:
-        reasons.append(f"Warning: Low Operating Margin ({data['opm']:.1f}%)")
-        score -= 1
-    else:
-        score += 2
+    # Negative scoring based on critical observations
+    for obs in observations:
+        if "CRITICAL" in obs: score -= 5
+        if "Margin" in obs: score -= 2
+        if "Masked" in obs: score -= 3
+        if "Collapse" in obs: score -= 2
         
-    if data['net_profit'] < 0:
-        reasons.append("CRITICAL: Net Loss reported.")
-        score -= 5
-    elif data['net_profit'] > 0 and data['operating_profit'] < 0:
-        reasons.append("Warning: Profit driven by Other Income, not Core Ops.")
-        score -= 3
-        
+    # Base Financials
+    if data['net_profit'] > 0: score += 1
+    if data['operating_profit'] > 0: score += 2
+    
     if score >= 2:
         verdict = "BUY / ACCUMULATE"
         color = "green"
-    elif score > -2:
+    elif score > -3:
         verdict = "HOLD / NEUTRAL"
         color = "orange"
     else:
-        verdict = "AVOID / SELL"
+        verdict = "STRONG AVOID / SELL"
         color = "red"
         
-    return {'verdict': verdict, 'color': color, 'reasons': reasons}
+    return {'verdict': verdict, 'color': color, 'reasons': observations}

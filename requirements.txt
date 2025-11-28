@@ -3,3 +3,4 @@ pdfplumber
 playwright
 pandas
 werkzeug
+gunicorn

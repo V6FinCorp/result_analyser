@@ -1,0 +1,5 @@
+flask
+pdfplumber
+playwright
+pandas
+werkzeug

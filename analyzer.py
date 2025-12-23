@@ -99,6 +99,17 @@ def extract_financial_data(pdf_path):
             data = process_financial_table(df)
             if data and data.get('table_data') and data['table_data'][0].get('revenue', 0) > 0:
                 logger.info(f"Successfully extracted data from Page {page_idx}.")
+                
+                # Determine result type
+                text_content = " ".join(df.astype(str).values.flatten()).lower()
+                data['result_type'] = "Consolidated" if "consolidated" in text_content else "Standalone"
+                
+                # Also extract corporate actions from full text
+                full_text = ""
+                for page in pdf.pages:
+                    full_text += page.extract_text() + "\n"
+                data['corporate_actions'] = extract_corporate_actions(full_text)
+                
                 return data
             else:
                 logger.warning(f"Table from Page {page_idx} failed processing or had zero revenue.")
@@ -109,12 +120,14 @@ def extract_financial_data(pdf_path):
         for page in pdf.pages:
             full_text += page.extract_text() + "\n"
             
+        corporate_actions = extract_corporate_actions(full_text)
         data = extract_from_text(full_text)
         if data and data.get('revenue', 0) > 0:
             logger.info("Successfully extracted data from text.")
             wrapped_data = {
                 'table_data': [{'period': 'Current', **data}],
                 'growth': {},
+                'corporate_actions': corporate_actions,
                 'observations': ["⚠️ Extracted from text. Comparison data unavailable."],
                 'recommendation': generate_recommendation(data, [])
             }
@@ -122,6 +135,60 @@ def extract_financial_data(pdf_path):
 
     logger.error("No valid financial data found.")
     return extracted_data
+
+def extract_corporate_actions(text):
+    """Extracts corporate actions like dividends, capex, etc. using keywords."""
+    actions = {
+        "dividend": "Not mentioned",
+        "capex": "Not mentioned",
+        "management_change": "Not mentioned",
+        "new_projects": "Not mentioned",
+        "special_announcement": "Not mentioned"
+    }
+    
+    lines = text.split('\n')
+    
+    # Dividend
+    for line in lines:
+        if any(k in line.lower() for k in ['dividend', 'declared', 'interim dividend', 'final dividend']):
+            # Try to extract numbers like 4, 0.7 or 2.50
+            matches = re.findall(r'\d+(?:\.\d+)?', line)
+            if matches:
+                actions['dividend'] = ", ".join(matches)
+                break
+                
+    # Capex
+    for line in lines:
+        if any(k in line.lower() for k in ['capex', 'capital expenditure', 'expansion', 'new plant', 'capacity']):
+            # Try to extract large numbers
+            matches = re.findall(r'\d+(?:,\d+)*(?:\.\d+)?', line)
+            if matches:
+                # Pick the largest number as it's likely the capex amount
+                clean_matches = [m.replace(',', '') for m in matches]
+                nums = [float(m) for m in clean_matches if float(m) > 10]
+                if nums:
+                    actions['capex'] = f"{max(nums):,.0f}"
+                    break
+            
+    # Management
+    for line in lines:
+        if any(k in line.lower() for k in ['appointment', 'resignation', 'ceo', 'cfo', 'director', 'managing director']):
+            actions['management_change'] = line.strip()
+            break
+            
+    # New Projects
+    for line in lines:
+        if any(k in line.lower() for k in ['new order', 'contract', 'project', 'awarded', 'segment']):
+            actions['new_projects'] = line.strip()
+            break
+
+    # Special Announcement
+    for line in lines:
+        if any(k in line.lower() for k in ['special', 'announcement', 'strategic', 'partnership', 'acquisition', 'merger']):
+            actions['special_announcement'] = line.strip()
+            break
+            
+    return actions
 
 def score_table(df, page_idx=0):
     """
@@ -133,11 +200,11 @@ def score_table(df, page_idx=0):
     
     # CRITICAL: Prioritize Consolidated over Standalone
     if 'consolidated' in text_content:
-        score += 50
-        logger.info(f"Page {page_idx}: CONSOLIDATED results detected (+50 bonus)")
+        score += 200
+        logger.info(f"Page {page_idx}: CONSOLIDATED results detected (+200 bonus)")
     elif 'standalone' in text_content:
-        score -= 20
-        logger.info(f"Page {page_idx}: Standalone results detected (-20 penalty)")
+        score -= 100
+        logger.info(f"Page {page_idx}: Standalone results detected (-100 penalty)")
     
     # Keyword Scoring
     keywords = {

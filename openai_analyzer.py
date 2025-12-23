@@ -28,36 +28,37 @@ def analyze_with_openai(pdf_path, api_key):
         client = OpenAI(api_key=api_key)
         
         # Convert PDF to images using PyMuPDF (first 5 pages)
-        logger.info("Converting PDF pages to images using PyMuPDF...")
+        logger.info("Converting PDF pages to images...")
         doc = fitz.open(pdf_path)
-        images = []
+        image_data_urls = []
         
-        for page_num in range(min(5, len(doc))):  # First 5 pages
+        for page_num in range(min(5, len(doc))):
             page = doc[page_num]
-            # Render page to image (matrix for 150 DPI)
-            mat = fitz.Matrix(150/72, 150/72)  # 150 DPI
+            # Use 120 DPI instead of 150 to reduce payload size
+            mat = fitz.Matrix(120/72, 120/72) 
             pix = page.get_pixmap(matrix=mat)
             
             # Convert to PIL Image
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            images.append(img)
+            
+            # Resize if still too large
+            if img.width > 1600 or img.height > 1600:
+                img.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+            
+            # Convert to base64 using JPEG (much smaller than PNG)
+            buffered = BytesIO()
+            img.save(buffered, format="JPEG", quality=80)
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            image_data_urls.append(f"data:image/jpeg;base64,{img_str}")
+            
+            logger.info(f"Processed and encoded page {page_num + 1}")
+            
+            # Explicitly clear memory
+            del pix
+            del img
         
         doc.close()
-        logger.info(f"Converted {len(images)} pages to images")
-        
-        # Encode images to base64
-        image_data_urls = []
-        for i, img in enumerate(images):
-            # Resize if too large (OpenAI has size limits)
-            if img.width > 2000 or img.height > 2000:
-                img.thumbnail((2000, 2000), Image.Resampling.LANCZOS)
-            
-            # Convert to base64
-            buffered = BytesIO()
-            img.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            image_data_urls.append(f"data:image/png;base64,{img_str}")
-            logger.info(f"Encoded page {i+1}")
+        logger.info(f"Successfully encoded {len(image_data_urls)} pages")
         
         # Construct the prompt
         prompt = """You are a financial analyst. Analyze the attached quarterly results PDF and provide a comprehensive analysis.
@@ -68,6 +69,7 @@ CRITICAL INSTRUCTIONS:
 3. All figures should be in ₹ Lakhs (Indian Rupees in Lakhs).
 
 Extract the following data:
+- result_type: Strictly "Consolidated" or "Standalone". If both are present, ONLY extract "Consolidated".
 - Revenue from Operations
 - Other Income
 - Total Expenses
@@ -76,6 +78,13 @@ Extract the following data:
 - Profit Before Tax
 - Net Profit
 - EPS (Earnings Per Share)
+
+Also, scan the text and notes for Corporate Actions/Announcements:
+- Dividend: Extract ONLY the numeric value(s) of dividend declared (e.g., "2.50" or "4, 0.7"). If multiple, separate with commas.
+- Capex: Extract ONLY the numeric value of capital expenditure/expansion (e.g., "12345").
+- Management Change: Brief mention of appointment/resignation.
+- New Projects/Orders: Brief mention of new contracts.
+- Special Announcement: Any other critical company update.
 
 For each metric, extract values for up to 4 periods (if available):
 - Current Quarter (most recent quarter)
@@ -100,6 +109,7 @@ Provide Investment Recommendation:
 
 IMPORTANT: Return ONLY valid JSON in this exact format (no markdown, no code blocks, just raw JSON):
 {
+  "result_type": "Consolidated",
   "table_data": [
     {"period": "Current", "revenue": 295.16, "other_income": 138.41, "total_expenses": 381.43, "operating_profit": -86.27, "opm": -29.2, "pbt": 52.14, "net_profit": 39.02, "eps": 0.26},
     {"period": "Prev Qtr", "revenue": 478.61, "other_income": 2.12, "total_expenses": 418.84, "operating_profit": 59.77, "opm": 12.5, "pbt": 61.89, "net_profit": 46.31, "eps": 0.31},
@@ -111,6 +121,13 @@ IMPORTANT: Return ONLY valid JSON in this exact format (no markdown, no code blo
     "net_profit_qoq": -15.7,
     "revenue_yoy": -3.7,
     "net_profit_yoy": -27.4
+  },
+  "corporate_actions": {
+    "dividend": "4, 0.7",
+    "capex": "12345",
+    "management_change": "CFO Resigned",
+    "new_projects": "New Railway Order",
+    "special_announcement": "Strategic Partnership"
   },
   "observations": [
     "🚨 CRITICAL RED FLAG: Operating Loss of -86.27 Lakhs. Core business is bleeding.",
@@ -124,7 +141,7 @@ IMPORTANT: Return ONLY valid JSON in this exact format (no markdown, no code blo
   }
 }
 
-If you cannot find certain data, use 0 as the value. Ensure all numeric values are numbers (not strings).
+If you cannot find certain data, use "Not mentioned" for corporate actions and 0 for numeric values. Ensure all numeric values are numbers (not strings).
 """
         
         # Prepare messages with images

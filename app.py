@@ -23,21 +23,28 @@ os.makedirs(app.config['DOWNLOAD_FOLDER'], exist_ok=True)
 def index():
     return render_template('index.html')
 
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204
+
 @app.route('/analyze', methods=['POST'])
 def analyze():
     file_path = None
     api_key = None
     
-    # Get API key from form
-    if 'api_key' in request.form:
-        api_key = request.form['api_key'].strip()
+    # Get Processing Mode
+    processing_mode = request.form.get('processing_mode', 'ai')
     
-    if not api_key:
-        return jsonify({'error': 'OpenAI API key is required. Please enter your API key.'}), 400
-    
-    # Validate API key format
-    if not api_key.startswith('sk-'):
-        return jsonify({'error': 'Invalid API key format. OpenAI keys start with "sk-"'}), 400
+    # Get API key from form (only required for AI mode)
+    if processing_mode == 'ai':
+        if 'api_key' in request.form:
+            api_key = request.form['api_key'].strip()
+        
+        if not api_key:
+            return jsonify({'error': 'OpenAI API key is required for AI mode.'}), 400
+        
+        if not api_key.startswith('sk-'):
+            return jsonify({'error': 'Invalid API key format. OpenAI keys start with "sk-"'}), 400
     
     # Handle File Upload
     if 'file' in request.files and request.files['file'].filename != '':
@@ -57,17 +64,21 @@ def analyze():
     else:
         return jsonify({'error': 'No file or URL provided'}), 400
     
-    # Process the PDF using OpenAI
+    # Process the PDF
     try:
-        from openai_analyzer import analyze_with_openai
-        
-        logger.info("Starting OpenAI-based analysis...")
-        data = analyze_with_openai(file_path, api_key)
+        if processing_mode == 'ai':
+            from openai_analyzer import analyze_with_openai
+            logger.info("Starting OpenAI-based analysis...")
+            data = analyze_with_openai(file_path, api_key)
+        else:
+            logger.info("Starting Local-based analysis...")
+            data = extract_financial_data(file_path)
         
         # Check for errors in the response
-        if 'error' in data:
-            logger.error(f"OpenAI analysis error: {data['error']}")
-            return jsonify({'error': data['error']}), 400
+        if not data or 'error' in data:
+            error_msg = data.get('error', 'Unknown error during extraction')
+            logger.error(f"Analysis error: {error_msg}")
+            return jsonify({'error': error_msg}), 400
             
         logger.info("Analysis completed successfully")
         return jsonify(data)
@@ -86,5 +97,11 @@ def analyze():
         else:
             return jsonify({'error': f'Analysis failed: {error_msg}'}), 500
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    logger.error(f"Unhandled Exception: {e}", exc_info=True)
+    return jsonify({'error': f"Server Error: {str(e)}"}), 500
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5001)
+    # Set use_reloader=False if you experience connection resets during development
+    app.run(debug=True, port=5001, use_reloader=False)

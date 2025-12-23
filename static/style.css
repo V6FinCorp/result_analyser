@@ -28,7 +28,8 @@ body {
 
 .container {
     width: 100%;
-    max-width: 900px; /* Wider for table */
+    max-width: 900px;
+    /* Wider for table */
 }
 
 header {
@@ -41,11 +42,28 @@ header h1 {
     margin-bottom: 0.5rem;
     background: linear-gradient(to right, #60a5fa, #a78bfa);
     -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 
 header p {
     color: var(--text-muted);
+}
+
+#result-type-container {
+    margin-top: 1rem;
+}
+
+#result-type-badge {
+    background-color: var(--primary);
+    color: white;
+    padding: 0.4rem 1rem;
+    border-radius: 2rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .input-section {
@@ -115,6 +133,40 @@ header p {
     border-top: 1px solid var(--border-color);
 }
 
+.processing-mode-section {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.section-label {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+}
+
+.radio-group {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.radio-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.95rem;
+    color: var(--text-main);
+}
+
+.radio-label input[type="radio"] {
+    width: 1.2rem;
+    height: 1.2rem;
+    accent-color: var(--primary);
+}
+
 #api-key-input {
     width: 100%;
     padding: 1rem;
@@ -175,7 +227,9 @@ header p {
 }
 
 @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* Results Section */
@@ -193,9 +247,17 @@ header p {
     margin-bottom: 0.5rem;
 }
 
-.green { color: var(--success); }
-.orange { color: var(--warning); }
-.red { color: var(--danger); }
+.green {
+    color: var(--success);
+}
+
+.orange {
+    color: var(--warning);
+}
+
+.red {
+    color: var(--danger);
+}
 
 /* Report Container */
 .section-box {
@@ -269,6 +331,36 @@ header p {
 .growth-item p {
     font-size: 1.2rem;
     font-weight: 700;
+}
+
+/* Corporate Actions Grid */
+.corporate-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.corporate-action-item {
+    background-color: var(--bg-color);
+    padding: 1rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border-color);
+}
+
+.corporate-action-item h4 {
+    color: var(--primary);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.corporate-action-item p {
+    font-size: 0.9rem;
+    line-height: 1.4;
+    color: var(--text-main);
 }
 
 /* Observations List */

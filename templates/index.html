@@ -14,6 +14,9 @@
         <header>
             <h1>AI Stock Analyzer</h1>
             <p>Upload a quarterly result PDF or provide a BSE/NSE URL for instant AI analysis.</p>
+            <div id="result-type-container" class="hidden">
+                <span id="result-type-badge"></span>
+            </div>
         </header>
 
         <div class="input-section">
@@ -33,7 +36,21 @@
                 <input type="text" id="url-input" placeholder="Paste BSE/NSE PDF URL here...">
             </div>
 
-            <div class="api-key-section">
+            <div class="processing-mode-section">
+                <p class="section-label">Processing Mode:</p>
+                <div class="radio-group">
+                    <label class="radio-label">
+                        <input type="radio" name="processing_mode" value="local" onchange="toggleApiKey()">
+                        <span>Local (Fast, No API Key)</span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="processing_mode" value="ai" checked onchange="toggleApiKey()">
+                        <span>AI Powered (Accurate, Needs Key)</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="api-key-section" id="api-key-container">
                 <input type="password" id="api-key-input" placeholder="Enter OpenAI API Key (sk-...)">
                 <p class="api-key-note">⚠️ Your API key is never stored and only used for this analysis</p>
             </div>
@@ -43,7 +60,7 @@
 
         <div id="loading" class="hidden">
             <div class="spinner"></div>
-            <p>AI is analyzing the financial data...</p>
+            <p id="loading-text">AI is analyzing the financial data...</p>
         </div>
 
         <div id="result-section" class="hidden">
@@ -70,6 +87,11 @@
                 <div class="section-box">
                     <h3>Growth Analysis</h3>
                     <div class="growth-grid" id="growth-section"></div>
+                </div>
+
+                <div class="section-box">
+                    <h3>Corporate Actions & Announcements</h3>
+                    <div class="corporate-actions-grid" id="corporate-actions-section"></div>
                 </div>
 
                 <div class="section-box">

@@ -3,51 +3,6 @@ import re
 import pandas as pd
 import math
 
-def extract_financial_data(pdf_path):
-    """
-    Extracts financial data from a PDF file.
-    Returns a dictionary with extracted metrics.
-    """
-    extracted_data = {}
-    
-    with pdfplumber.open(pdf_path) as pdf:
-        print(f"Analyzing PDF: {pdf_path}")
-        
-        # Strategy 1: Table Extraction with Text Strategy (Robust for this PDF)
-        for i, page in enumerate(pdf.pages):
-            # Use text strategy to handle complex layouts/interleaving
-            tables = page.extract_tables(table_settings={
-                "vertical_strategy": "text", 
-                "horizontal_strategy": "text",
-                "snap_tolerance": 5
-            })
-            
-            for table in tables:
-                df = pd.DataFrame(table).fillna('')
-                
-                # Clean up
-                df = df.dropna(how='all').dropna(axis=1, how='all')
-                
-                # Check for financial keywords in the raw table (multiline)
-                df_str = df.astype(str)
-                row_text = df_str.apply(lambda x: ' '.join(x), axis=1).str.lower()
-                
-                if row_text.str.contains('revenue|sales|income from operations').any() and \
-                   row_text.str.contains('profit|loss').any():
-                    print(f"Page {i+1}: Found Financial Table via Text Strategy")
-                    data = process_financial_table(df)
-                    if data and data.get('revenue', 0) > 0:
-                        return data
-
-        # Strategy 2: Text-Based Extraction (Fallback)
-        print("Table extraction failed. Attempting text-based extraction...")
-        full_text = ""
-        for page in pdf.pages:
-            full_text += page.extract_text() + "\n"
-            
-        data = extract_from_text(full_text)
-        if data and data.get('revenue', 0) > 0:
-            print("Successfully extracted data from text.")
 import logging
 
 # Configure Logging

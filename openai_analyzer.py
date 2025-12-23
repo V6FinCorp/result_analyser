@@ -27,14 +27,51 @@ def analyze_with_openai(pdf_path, api_key):
         # Initialize OpenAI client
         client = OpenAI(api_key=api_key)
         
-        # Convert PDF to images using PyMuPDF (first 5 pages)
-        logger.info("Converting PDF pages to images...")
+        # Open PDF
+        logger.info(f"Opening PDF for smart page selection: {pdf_path}")
         doc = fitz.open(pdf_path)
-        image_data_urls = []
         
-        for page_num in range(min(5, len(doc))):
+        # 1. Smart Page Selection Logic
+        page_scores = []
+        for i, page in enumerate(doc):
+            text = page.get_text().lower()
+            score = 0
+            
+            # Keywords that indicate a financial results table
+            if any(k in text for k in ["revenue from operations", "net profit", "total income", "total expenses"]):
+                score += 50
+            if any(k in text for k in ["statement of", "financial results", "profit and loss"]):
+                score += 30
+            if "quarter ended" in text or "year ended" in text:
+                score += 20
+                
+            # CRITICAL: Prioritize Consolidated
+            if "consolidated" in text:
+                score += 100
+            elif "standalone" in text:
+                score += 10 # Lower priority but still a table
+                
+            if score > 0:
+                page_scores.append((score, i))
+        
+        # Sort by score descending and pick top 10 pages
+        page_scores.sort(key=lambda x: x[0], reverse=True)
+        selected_pages = [idx for score, idx in page_scores[:10]]
+        
+        # If no pages scored, fallback to first 5
+        if not selected_pages:
+            logger.warning("No relevant pages found via keyword scan. Falling back to first 5 pages.")
+            selected_pages = list(range(min(5, len(doc))))
+        else:
+            # Sort selected pages by their original order
+            selected_pages.sort()
+            logger.info(f"Smart selection picked pages: {[p+1 for p in selected_pages]}")
+
+        # 2. Convert selected pages to images
+        image_data_urls = []
+        for page_num in selected_pages:
             page = doc[page_num]
-            # Use 120 DPI instead of 150 to reduce payload size
+            # Use 120 DPI to balance quality and payload size
             mat = fitz.Matrix(120/72, 120/72) 
             pix = page.get_pixmap(matrix=mat)
             
@@ -45,7 +82,7 @@ def analyze_with_openai(pdf_path, api_key):
             if img.width > 1600 or img.height > 1600:
                 img.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
             
-            # Convert to base64 using JPEG (much smaller than PNG)
+            # Convert to base64 using JPEG
             buffered = BytesIO()
             img.save(buffered, format="JPEG", quality=80)
             img_str = base64.b64encode(buffered.getvalue()).decode()
@@ -58,7 +95,7 @@ def analyze_with_openai(pdf_path, api_key):
             del img
         
         doc.close()
-        logger.info(f"Successfully encoded {len(image_data_urls)} pages")
+        logger.info(f"Successfully encoded {len(image_data_urls)} pages for AI analysis")
         
         # Construct the prompt
         prompt = """You are a financial analyst. Analyze the attached quarterly results PDF and provide a comprehensive analysis.

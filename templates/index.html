@@ -16,6 +16,7 @@
             <p>Upload a quarterly result PDF or provide a BSE/NSE URL for instant AI analysis.</p>
             <div id="result-type-container" class="hidden">
                 <span id="result-type-badge"></span>
+                <span id="processing-method-badge"></span>
             </div>
         </header>
 
@@ -41,18 +42,37 @@
                 <div class="radio-group">
                     <label class="radio-label">
                         <input type="radio" name="processing_mode" value="local" onchange="toggleApiKey()">
-                        <span>Local (Fast, No API Key)</span>
+                        <span>⚡ Local (Fast, Free, 70% Accurate)</span>
                     </label>
                     <label class="radio-label">
-                        <input type="radio" name="processing_mode" value="ai" checked onchange="toggleApiKey()">
-                        <span>AI Powered (Accurate, Needs Key)</span>
+                        <input type="radio" name="processing_mode" value="smart" checked onchange="toggleApiKey()">
+                        <span>🧠 Smart (Auto-Hybrid, Cost-Optimized)</span>
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="processing_mode" value="ai" onchange="toggleApiKey()">
+                        <span>🤖 AI Only (Slow, Paid, 95% Accurate)</span>
                     </label>
                 </div>
+                <p class="mode-description" id="mode-description">
+                    Smart mode tries local extraction first (free). Falls back to AI only if needed. Best for cost
+                    savings!
+                </p>
             </div>
 
             <div class="api-key-section" id="api-key-container">
                 <input type="password" id="api-key-input" placeholder="Enter OpenAI API Key (sk-...)">
                 <p class="api-key-note">⚠️ Your API key is never stored and only used for this analysis</p>
+            </div>
+
+            <div class="page-limit-section" id="page-limit-container">
+                <p class="section-label">AI Page Limit: <span id="page-limit-value">10</span> pages</p>
+                <input type="range" id="page-limit-slider" min="5" max="20" step="5" value="10"
+                    oninput="updatePageLimit(this.value)">
+                <div class="page-limit-info">
+                    <span>5 (Cheaper)</span>
+                    <span>20 (More Accurate)</span>
+                </div>
+                <p class="page-limit-note">💡 More pages = higher accuracy but higher cost (~$0.02 per page)</p>
             </div>
 
             <button id="analyze-btn" onclick="analyzeStock()">Analyze Result</button>

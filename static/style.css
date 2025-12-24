@@ -52,9 +52,14 @@ header p {
 
 #result-type-container {
     margin-top: 1rem;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    align-items: center;
 }
 
-#result-type-badge {
+#result-type-badge,
+#processing-method-badge {
     background-color: var(--primary);
     color: white;
     padding: 0.4rem 1rem;
@@ -64,6 +69,11 @@ header p {
     text-transform: uppercase;
     letter-spacing: 0.05em;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+#processing-method-badge {
+    font-size: 0.75rem;
+    padding: 0.3rem 0.8rem;
 }
 
 .input-section {
@@ -148,7 +158,8 @@ header p {
 
 .radio-group {
     display: flex;
-    gap: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
     margin-bottom: 0.5rem;
 }
 
@@ -186,6 +197,65 @@ header p {
     margin-top: 0.5rem;
     font-size: 0.75rem;
     color: var(--warning);
+    text-align: center;
+}
+
+.mode-description {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-style: italic;
+    line-height: 1.4;
+}
+
+.page-limit-section {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+#page-limit-slider {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-color);
+    border-radius: 5px;
+    outline: none;
+    margin: 1rem 0;
+    cursor: pointer;
+}
+
+#page-limit-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: var(--primary);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+#page-limit-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    background: var(--primary);
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.page-limit-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+}
+
+.page-limit-note {
+    font-size: 0.75rem;
+    color: var(--text-muted);
     text-align: center;
 }
 

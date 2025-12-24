@@ -11,17 +11,32 @@ function switchTab(tab) {
     }
 }
 
+function updatePageLimit(value) {
+    document.getElementById('page-limit-value').textContent = value;
+}
+
 function toggleApiKey() {
     const mode = document.querySelector('input[name="processing_mode"]:checked').value;
-    const container = document.getElementById('api-key-container');
+    const apiContainer = document.getElementById('api-key-container');
+    const pageLimitContainer = document.getElementById('page-limit-container');
     const loadingText = document.getElementById('loading-text');
+    const modeDescription = document.getElementById('mode-description');
 
     if (mode === 'local') {
-        container.style.display = 'none';
-        loadingText.textContent = 'Local engine is extracting financial data...';
+        apiContainer.style.display = 'none';
+        pageLimitContainer.style.display = 'none';
+        loadingText.textContent = '⚡ Local engine is extracting financial data...';
+        modeDescription.textContent = 'Fast rule-based extraction. No API key needed. Best for simple PDFs.';
+    } else if (mode === 'smart') {
+        apiContainer.style.display = 'block';
+        pageLimitContainer.style.display = 'block';
+        loadingText.textContent = '🧠 Smart mode analyzing... (trying local first)';
+        modeDescription.textContent = 'Smart mode tries local extraction first (free). Falls back to AI only if needed. Best for cost savings!';
     } else {
-        container.style.display = 'block';
-        loadingText.textContent = 'AI is analyzing the financial data...';
+        apiContainer.style.display = 'block';
+        pageLimitContainer.style.display = 'block';
+        loadingText.textContent = '🤖 AI is analyzing the financial data...';
+        modeDescription.textContent = 'AI-powered analysis using GPT-4 Vision. Most accurate but requires API credits.';
     }
 }
 
@@ -77,10 +92,14 @@ async function analyzeStock() {
     const mode = document.querySelector('input[name="processing_mode"]:checked').value;
     formData.append('processing_mode', mode);
 
-    if (mode === 'ai') {
+    // Get page limit for AI and Smart modes
+    const pageLimit = document.getElementById('page-limit-slider').value;
+    formData.append('ai_page_limit', pageLimit);
+
+    if (mode === 'ai' || mode === 'smart') {
         const apiKey = document.getElementById('api-key-input').value.trim();
         if (!apiKey) {
-            alert("Please enter your OpenAI API key.");
+            alert("Please enter your OpenAI API key for AI/Smart mode.");
             resetUI();
             return;
         }
@@ -151,21 +170,49 @@ function displayResult(data) {
     // Show Result Type Badge
     const typeContainer = document.getElementById('result-type-container');
     const typeBadge = document.getElementById('result-type-badge');
+    const methodBadge = document.getElementById('processing-method-badge');
+
     if (data.result_type) {
         typeContainer.classList.remove('hidden');
         typeBadge.textContent = data.result_type;
         typeBadge.style.backgroundColor = data.result_type === 'Consolidated' ? 'var(--success)' : 'var(--primary)';
     }
 
-    const rec = data.recommendation;
-    const verdict = document.getElementById('verdict');
-    verdict.textContent = rec.verdict;
-    verdict.className = rec.color;
+    // Show Processing Method Badge
+    if (data.processing_method) {
+        const method = data.processing_method;
+        methodBadge.textContent = method;
 
-    renderTable(data.table_data);
-    renderGrowth(data.growth);
-    renderCorporateActions(data.corporate_actions);
-    renderObservations(data.observations);
+        if (method === 'Local') {
+            methodBadge.style.backgroundColor = '#10b981'; // Green
+            methodBadge.title = 'Processed locally - No cost';
+        } else if (method === 'AI (Fallback)') {
+            methodBadge.style.backgroundColor = '#f59e0b'; // Orange
+            methodBadge.title = 'Local failed, used AI fallback';
+        } else {
+            methodBadge.style.backgroundColor = '#3b82f6'; // Blue
+            methodBadge.title = 'Processed with AI';
+        }
+    }
+
+    // Safe access to recommendation
+    const rec = data.recommendation || { verdict: 'UNKNOWN', color: 'orange', reasons: [] };
+    const verdict = document.getElementById('verdict');
+    if (verdict) {
+        verdict.textContent = rec.verdict || 'ANALYSIS INCOMPLETE';
+        verdict.className = rec.color || 'orange';
+    }
+
+    // Show cost savings notification
+    if (data.cost_saved) {
+        console.log('💰 Cost saved! Used local extraction instead of AI.');
+    }
+
+    // Safe render calls
+    renderTable(data.table_data || []);
+    renderGrowth(data.growth || {});
+    renderCorporateActions(data.corporate_actions || {});
+    renderObservations(data.observations || []);
 }
 
 function renderCorporateActions(actions) {

@@ -55,15 +55,17 @@ def extract_financial_data(pdf_path):
             if data and data.get('table_data') and data['table_data'][0].get('revenue', 0) > 0:
                 logger.info(f"Successfully extracted data from Page {page_idx}.")
                 
-                # Determine result type
-                text_content = " ".join(df.astype(str).values.flatten()).lower()
-                data['result_type'] = "Consolidated" if "consolidated" in text_content else "Standalone"
-                
                 # Also extract corporate actions from full text
                 full_text = ""
+                first_page_text = pdf.pages[0].extract_text()
                 for page in pdf.pages:
                     full_text += page.extract_text() + "\n"
+                
                 data['corporate_actions'] = extract_corporate_actions(full_text)
+                
+                # Add identifiers and period
+                ids_period = extract_identifiers_and_period(full_text, first_page_text)
+                data.update(ids_period)
                 
                 return data
             else:
@@ -89,7 +91,18 @@ def extract_financial_data(pdf_path):
             return wrapped_data
 
     logger.error("No valid financial data found.")
-    return extracted_data
+    return {
+        'error': 'No valid financial data found in the PDF. Please try AI mode or check if the PDF contains financial tables.',
+        'table_data': [],
+        'growth': {},
+        'corporate_actions': {},
+        'observations': [],
+        'recommendation': {
+            'verdict': 'UNABLE TO ANALYZE',
+            'color': 'red',
+            'reasons': ['No financial data could be extracted from the PDF']
+        }
+    }
 
 def extract_corporate_actions(text):
     """Extracts corporate actions like dividends, capex, etc. using keywords."""
@@ -126,12 +139,14 @@ def extract_corporate_actions(text):
                     break
             
     # Management
+    actions['management_change'] = "No"
     for line in lines:
         if any(k in line.lower() for k in ['appointment', 'resignation', 'ceo', 'cfo', 'director', 'managing director']):
-            actions['management_change'] = line.strip()
+            actions['management_change'] = "Yes"
             break
             
-    # New Projects
+    # New Projects (Keep tracking but not in separate SQL column per request)
+    actions['new_projects'] = "Not mentioned"
     for line in lines:
         if any(k in line.lower() for k in ['new order', 'contract', 'project', 'awarded', 'segment']):
             actions['new_projects'] = line.strip()
@@ -144,6 +159,66 @@ def extract_corporate_actions(text):
             break
             
     return actions
+
+def extract_identifiers_and_period(text, first_page_text):
+    """
+    Extracts company identifiers from the first page and 
+    financial period (Quarter/Year) from the full text.
+    """
+    results = {
+        "company_id": None,
+        "company_code": None,
+        "quarter": "Q1",
+        "year": 2025
+    }
+    
+    # 1. Extract Identifiers from Page 1
+    # Patterns for numeric Scrip Codes
+    id_patterns = [
+        r"(?:Scrip code no:|Security Code:|Scrip code:|Scrip Code:|BSE Scrip Code:|BSE STOCK CODE:)\s*(\d{6})",
+        r"Scrip code\s*:\s*(\d{6})",
+        r"Security Code\s*:\s*(\d{6})"
+    ]
+    for pattern in id_patterns:
+        match = re.search(pattern, first_page_text, re.IGNORECASE)
+        if match:
+            results["company_id"] = match.group(1)
+            break
+            
+    # Patterns for Alphabetic Symbols
+    code_patterns = [
+        r"(?:Symbol:|NSE Symbol :|NSE CODE:|NSE Symbol:)\s*([A-Z0-9]+)",
+        r"Symbol\s*:\s*([A-Z0-9]+)",
+        r"NSE CODE\s*:\s*([A-Z0-9]+)"
+    ]
+    for pattern in code_patterns:
+        match = re.search(pattern, first_page_text, re.IGNORECASE)
+        if match:
+            val = match.group(1).strip()
+            # If it's a number, it might be an ID - skip if purely text is expected
+            if not val.isdigit():
+                results["company_code"] = val
+                break
+
+    # 2. Extract Period (Quarter & Year)
+    period_text = " ".join(text.split()[:500]) # Look at start of doc
+    months = {
+        "june": "Q1", "jun": "Q1",
+        "september": "Q2", "sep": "Q2",
+        "december": "Q3", "dec": "Q3",
+        "march": "Q4", "mar": "Q4"
+    }
+    
+    for month_name, qtr in months.items():
+        if month_name in period_text.lower():
+            results["quarter"] = qtr
+            break
+            
+    year_match = re.search(r"20(\d{2})", period_text)
+    if year_match:
+        results["year"] = int(year_match.group(0))
+        
+    return results
 
 def score_table(df, page_idx=0):
     """

@@ -10,13 +10,16 @@ from PIL import Image
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def analyze_with_openai(pdf_path, api_key):
+def analyze_with_openai(pdf_path, api_key, max_pages=10):
     """
     Analyzes a financial PDF using OpenAI GPT-4 Vision API.
     
     Args:
         pdf_path: Path to the PDF file
         api_key: OpenAI API key (provided by user, not stored)
+        max_pages: Maximum number of pages to send to OpenAI (default: 10)
+                   Higher = more accurate but more expensive
+                   Options: 5, 10, 15, 20
     
     Returns:
         Dictionary with analysis results matching the frontend format
@@ -54,18 +57,19 @@ def analyze_with_openai(pdf_path, api_key):
             if score > 0:
                 page_scores.append((score, i))
         
-        # Sort by score descending and pick top 10 pages
+        # Sort by score descending and pick top N pages based on max_pages
         page_scores.sort(key=lambda x: x[0], reverse=True)
-        selected_pages = [idx for score, idx in page_scores[:10]]
+        selected_pages = [idx for score, idx in page_scores[:max_pages]]
         
-        # If no pages scored, fallback to first 5
+        # If no pages scored, fallback to first N pages (half of max_pages)
         if not selected_pages:
-            logger.warning("No relevant pages found via keyword scan. Falling back to first 5 pages.")
-            selected_pages = list(range(min(5, len(doc))))
+            fallback_count = max(5, max_pages // 2)
+            logger.warning(f"No relevant pages found via keyword scan. Falling back to first {fallback_count} pages.")
+            selected_pages = list(range(min(fallback_count, len(doc))))
         else:
             # Sort selected pages by their original order
             selected_pages.sort()
-            logger.info(f"Smart selection picked pages: {[p+1 for p in selected_pages]}")
+            logger.info(f"Smart selection picked {len(selected_pages)} pages: {[p+1 for p in selected_pages]} (max_pages={max_pages})")
 
         # 2. Convert selected pages to images
         image_data_urls = []
@@ -105,7 +109,11 @@ CRITICAL INSTRUCTIONS:
 2. Look for the main financial results table (usually titled "Statement of Profit and Loss" or similar).
 3. All figures should be in ₹ Lakhs (Indian Rupees in Lakhs).
 
-Extract the following data:
+ Extract the following data:
+- company_id: Look at the first page for labels like "Scrip code", "Security Code", etc. If it is a NUMBER (e.g. 513699), extract it here.
+- company_code: Look at the first page for labels like "Symbol", "NSE CODE", etc. If it is TEXT (e.g. EICHERMOT), extract it here.
+- quarter: Strictly one of "Q1", "Q2", "Q3", "Q4" based on the period end month (Mar=Q4, Jun=Q1, Sep=Q2, Dec=Q3).
+- year: The 4-digit financial year (e.g. 2025).
 - result_type: Strictly "Consolidated" or "Standalone". If both are present, ONLY extract "Consolidated".
 - Revenue from Operations
 - Other Income
@@ -117,64 +125,36 @@ Extract the following data:
 - EPS (Earnings Per Share)
 
 Also, scan the text and notes for Corporate Actions/Announcements:
-- Dividend: Extract ONLY the numeric value(s) of dividend declared (e.g., "2.50" or "4, 0.7"). If multiple, separate with commas.
-- Capex: Extract ONLY the numeric value of capital expenditure/expansion (e.g., "12345").
-- Management Change: Brief mention of appointment/resignation.
-- New Projects/Orders: Brief mention of new contracts.
+- Dividend: Extract ONLY the numeric value(s) of dividend declared.
+- Capex: Extract ONLY the numeric value of capital expenditure/expansion in Lakhs.
+- Management Change: Strictly "Yes" if any appointment or resignation is mentioned, otherwise "No".
 - Special Announcement: Any other critical company update.
 
-For each metric, extract values for up to 4 periods (if available):
-- Current Quarter (most recent quarter)
-- Previous Quarter (sequential quarter before current)
-- Year-over-Year Quarter (same quarter last year)
-- Year Ended (full year audited results)
+Calculate Growth Metrics... (remaining logic same)
 
-Calculate Growth Metrics:
-- QoQ Growth % for Revenue and Net Profit: ((Current - Previous) / Previous * 100)
-- YoY Growth % for Revenue and Net Profit: ((Current - YoY Quarter) / YoY Quarter * 100)
-
-Generate Key Observations (use emojis for visual impact):
-- 🚨 If Operating Profit is negative, flag as "CRITICAL RED FLAG: Operating Loss"
-- ⚠️ If OPM is negative or declining significantly, flag as "Margin Collapse" or "Margin Compression"
-- 📉 If Revenue dropped >10% QoQ or YoY, flag as "Revenue Collapse"
-- ⚠️ If Expenses increased while Revenue declined, flag as "Expense Mismanagement"
-
-Provide Investment Recommendation:
-- Verdict: "BUY / ACCUMULATE", "HOLD / NEUTRAL", or "STRONG AVOID / SELL"
-- Color: "green", "orange", or "red"
-- Reasons: List of key observations
-
-IMPORTANT: Return ONLY valid JSON in this exact format (no markdown, no code blocks, just raw JSON):
+IMPORTANT: Return ONLY valid JSON in this exact format (ensure numeric values are numbers):
 {
+  "company_id": "513699",
+  "company_code": "EICHERMOT",
+  "quarter": "Q2",
+  "year": 2025,
   "result_type": "Consolidated",
   "table_data": [
     {"period": "Current", "revenue": 295.16, "other_income": 138.41, "total_expenses": 381.43, "operating_profit": -86.27, "opm": -29.2, "pbt": 52.14, "net_profit": 39.02, "eps": 0.26},
-    {"period": "Prev Qtr", "revenue": 478.61, "other_income": 2.12, "total_expenses": 418.84, "operating_profit": 59.77, "opm": 12.5, "pbt": 61.89, "net_profit": 46.31, "eps": 0.31},
-    {"period": "YoY Qtr", "revenue": 306.57, "other_income": 1.06, "total_expenses": 235.82, "operating_profit": 70.75, "opm": 23.1, "pbt": 71.81, "net_profit": 53.74, "eps": 0.44},
-    {"period": "Year Ended", "revenue": 1445.26, "other_income": 61.33, "total_expenses": 1385.27, "operating_profit": 59.99, "opm": 4.2, "pbt": 121.32, "net_profit": 88.52, "eps": 0.72}
+    ...
   ],
-  "growth": {
-    "revenue_qoq": -38.3,
-    "net_profit_qoq": -15.7,
-    "revenue_yoy": -3.7,
-    "net_profit_yoy": -27.4
-  },
+  "growth": { ... },
   "corporate_actions": {
     "dividend": "4, 0.7",
     "capex": "12345",
-    "management_change": "CFO Resigned",
-    "new_projects": "New Railway Order",
+    "management_change": "Yes",
     "special_announcement": "Strategic Partnership"
   },
-  "observations": [
-    "🚨 CRITICAL RED FLAG: Operating Loss of -86.27 Lakhs. Core business is bleeding.",
-    "⚠️ Margin Collapse: Operating Profit Margin (OPM) is negative at -29.2%.",
-    "📉 Revenue Collapse: Revenue crashed -38.3% QoQ."
-  ],
+  "observations": [ ... ],
   "recommendation": {
     "verdict": "STRONG AVOID / SELL",
     "color": "red",
-    "reasons": ["Operating Loss", "Margin Collapse", "Revenue Decline"]
+    "reasons": [ ... ]
   }
 }
 

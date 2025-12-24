@@ -112,13 +112,12 @@ def analyze():
         if processing_mode == 'smart':
             # SMART MODE: Try local first, fallback to AI if needed
             logger.info("🧠 Starting SMART mode - trying local extraction first...")
-            local_data = extract_financial_data(file_path)
+            data = extract_financial_data(file_path)
             
-            if is_high_confidence(local_data):
+            if is_high_confidence(data):
                 logger.info("✅ Local extraction successful - using local results (COST: $0)")
-                local_data['processing_method'] = 'Local'
-                local_data['cost_saved'] = True
-                return jsonify(local_data)
+                data['processing_method'] = 'Local'
+                data['cost_saved'] = True
             else:
                 logger.warning("⚠️ Low confidence in local results - falling back to AI...")
                 from openai_analyzer import analyze_with_openai
@@ -126,8 +125,11 @@ def analyze():
                 ai_data['processing_method'] = 'AI (Fallback)'
                 ai_data['cost_saved'] = False
                 ai_data['fallback_reason'] = 'Local extraction had low confidence'
+                # Merge local logs into AI data for debugging
+                if 'debug_logs' in data:
+                    ai_data['debug_logs'] = data['debug_logs'] + ai_data.get('debug_logs', [])
+                data = ai_data
                 logger.info("✅ AI analysis completed successfully")
-                return jsonify(ai_data)
                 
         elif processing_mode == 'ai':
             # AI MODE: Direct AI analysis
@@ -161,6 +163,9 @@ def analyze():
         except Exception as db_err:
             logger.error(f"Database trigger error: {db_err}")
             data['saved_to_db'] = False
+
+        if data.get('debug_logs'):
+            logger.info(f"Captured {len(data['debug_logs'])} debug logs from analyzer")
 
         logger.info("Analysis completed successfully")
         return jsonify(data)

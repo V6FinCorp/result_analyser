@@ -10,120 +10,130 @@
 </head>
 
 <body>
-    <div class="container">
-        <header>
-            <h1>AI Stock Analyzer</h1>
-            <p>Upload a quarterly result PDF or provide a BSE/NSE URL for instant AI analysis.</p>
-            <div id="result-type-container" class="hidden">
-                <span id="result-type-badge"></span>
-                <span id="processing-method-badge"></span>
-            </div>
-        </header>
-
-        <div class="input-section">
-            <div class="tabs">
-                <button class="tab-btn active" onclick="switchTab('upload')">Upload PDF</button>
-                <button class="tab-btn" onclick="switchTab('url')">Enter URL</button>
-            </div>
-
-            <div id="upload-tab" class="tab-content active">
-                <div class="upload-area" id="drop-zone">
-                    <p>Drag & Drop PDF here or <span>Browse</span></p>
-                    <input type="file" id="file-input" accept=".pdf" hidden>
-                </div>
-            </div>
-
-            <div id="url-tab" class="tab-content">
-                <input type="text" id="url-input" placeholder="Paste BSE/NSE PDF URL here...">
-            </div>
-
-            <div class="processing-mode-section">
-                <p class="section-label">Processing Mode:</p>
-                <div class="radio-group">
-                    <label class="radio-label">
-                        <input type="radio" name="processing_mode" value="local" onchange="toggleApiKey()">
-                        <span>⚡ Local (Fast, Free, 70% Accurate)</span>
-                    </label>
-                    <label class="radio-label">
-                        <input type="radio" name="processing_mode" value="smart" checked onchange="toggleApiKey()">
-                        <span>🧠 Smart (Auto-Hybrid, Cost-Optimized)</span>
-                    </label>
-                    <label class="radio-label">
-                        <input type="radio" name="processing_mode" value="ai" onchange="toggleApiKey()">
-                        <span>🤖 AI Only (Slow, Paid, 95% Accurate)</span>
-                    </label>
-                </div>
-                <p class="mode-description" id="mode-description">
-                    Smart mode tries local extraction first (free). Falls back to AI only if needed. Best for cost
-                    savings!
-                </p>
-            </div>
-
-            <div class="api-key-section" id="api-key-container">
-                <input type="password" id="api-key-input" placeholder="Enter OpenAI API Key (sk-...)">
-                <p class="api-key-note">⚠️ Your API key is never stored and only used for this analysis</p>
-            </div>
-
-            <div class="page-limit-section" id="page-limit-container">
-                <p class="section-label">AI Page Limit: <span id="page-limit-value">10</span> pages</p>
-                <input type="range" id="page-limit-slider" min="5" max="20" step="5" value="10"
-                    oninput="updatePageLimit(this.value)">
-                <div class="page-limit-info">
-                    <span>5 (Cheaper)</span>
-                    <span>20 (More Accurate)</span>
-                </div>
-                <p class="page-limit-note">💡 More pages = higher accuracy but higher cost (~$0.02 per page)</p>
-            </div>
-
-            <button id="analyze-btn" onclick="analyzeStock()">Analyze Result</button>
+    <header>
+        <h1>AI Stock Analyzer</h1>
+        <p>Upload a quarterly result PDF or provide a BSE/NSE URL for instant AI analysis.</p>
+        <div id="result-type-container" class="hidden">
+            <span id="result-type-badge"></span>
+            <span id="processing-method-badge"></span>
         </div>
+    </header>
+    <div class="main-layout">
+        <div class="container">
 
-        <div id="loading" class="hidden">
-            <div class="spinner"></div>
-            <p id="loading-text">AI is analyzing the financial data...</p>
-        </div>
+            <div class="input-section">
+                <!-- ... (tabs and inputs same) ... -->
+                <div class="tabs">
+                    <button class="tab-btn active" onclick="switchTab('upload')">Upload PDF</button>
+                    <button class="tab-btn" onclick="switchTab('url')">Enter URL</button>
+                </div>
 
-        <div id="result-section" class="hidden">
-            <div class="recommendation-card" id="rec-card">
-                <h2 id="verdict">BUY / SELL</h2>
-                <ul id="reasons-list"></ul>
-            </div>
-
-            <div class="report-container">
-                <div class="section-box">
-                    <h3>Quarterly Financial Comparison (₹ Lakhs)</h3>
-                    <div class="table-responsive">
-                        <table class="financial-table" id="comparison-table">
-                            <thead>
-                                <tr>
-                                    <th>Particulars</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
+                <div id="upload-tab" class="tab-content active">
+                    <div class="upload-area" id="drop-zone">
+                        <p>Drag & Drop PDF here or <span>Browse</span></p>
+                        <input type="file" id="file-input" accept=".pdf" hidden>
                     </div>
                 </div>
 
-                <div class="section-box">
-                    <h3>Growth Analysis</h3>
-                    <div class="growth-grid" id="growth-section"></div>
+                <div id="url-tab" class="tab-content">
+                    <input type="text" id="url-input" placeholder="Paste BSE/NSE PDF URL here...">
                 </div>
 
-                <div class="section-box">
-                    <h3>Corporate Actions & Announcements</h3>
-                    <div class="corporate-actions-grid" id="corporate-actions-section"></div>
+                <div class="processing-mode-section">
+                    <p class="section-label">Processing Mode:</p>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="processing_mode" value="local" onchange="toggleApiKey()">
+                            <span>⚡ Local (Fast, Free, 70% Accurate)</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="processing_mode" value="smart" checked onchange="toggleApiKey()">
+                            <span>🧠 Smart (Auto-Hybrid, Cost-Optimized)</span>
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="processing_mode" value="ai" onchange="toggleApiKey()">
+                            <span>🤖 AI Only (Slow, Paid, 95% Accurate)</span>
+                        </label>
+                    </div>
                 </div>
 
-                <div class="section-box">
-                    <h3>Key Observations</h3>
-                    <ul class="observations-list" id="observations-list"></ul>
+                <div class="api-key-section" id="api-key-container">
+                    <input type="password" id="api-key-input" placeholder="Enter OpenAI API Key (sk-...)">
+                </div>
+
+                <div class="page-limit-section" id="page-limit-container">
+                    <p class="section-label">AI Page Limit: <span id="page-limit-value">10</span> pages</p>
+                    <input type="range" id="page-limit-slider" min="5" max="20" step="5" value="10"
+                        oninput="updatePageLimit(this.value)">
+                </div>
+
+                <div class="debug-toggle-container">
+                    <span>Analysis Debug Mode</span>
+                    <label class="switch">
+                        <input type="checkbox" id="debug-toggle" onchange="toggleDebugMode()">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <button id="analyze-btn" onclick="analyzeStock()">Analyze Result</button>
+            </div>
+
+            <div id="loading" class="hidden">
+                <div class="spinner"></div>
+                <p id="loading-text">Analysis underway...</p>
+            </div>
+
+            <div id="result-section" class="hidden">
+                <div class="recommendation-card" id="rec-card">
+                    <h2 id="verdict">BUY / SELL</h2>
+                    <ul id="reasons-list"></ul>
+                </div>
+
+                <div class="report-container">
+                    <div class="section-box">
+                        <h3>Quarterly Financial Comparison (₹ Lakhs)</h3>
+                        <div class="table-responsive">
+                            <table class="financial-table" id="comparison-table">
+                                <thead>
+                                    <tr id="table-headers">
+                                        <th>Particulars</th>
+                                        <!-- Dynamic periods will go here -->
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+
+                    <div class="section-box">
+                        <h3>Corporate Actions & Announcements</h3>
+                        <div class="corporate-actions-grid" id="corporate-actions-section"></div>
+                    </div>
+
+                    <div class="section-box">
+                        <h3>Key Observations</h3>
+                        <ul class="observations-list" id="observations-list"></ul>
+                    </div>
                 </div>
             </div>
+            <footer>
+                <p style="text-align: center; margin-top: 2rem; color: #64748b; font-size: 0.8rem;">Stock Analyzer v2.1
+                    (Enhanced Logic)</p>
+            </footer>
         </div>
-        <footer>
-            <p style="text-align: center; margin-top: 2rem; color: #64748b; font-size: 0.8rem;">Stock Analyzer v2.0 -
-                AI-Powered Analysis</p>
-        </footer>
+
+        <aside id="debug-sidebar">
+            <div class="debug-header">
+                <h3>Analysis Lifecycle</h3>
+                <span id="ai-cost-badge" class="hidden"
+                    style="font-size: 0.75rem; background: #3b82f6; color: white; padding: 2px 8px; border-radius: 4px;">Cost:
+                    $0.00</span>
+            </div>
+            <div class="debug-logs" id="debug-logs">
+                <div class="log-entry">Debug output will appear here after analysis...</div>
+            </div>
+        </aside>
     </div>
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>

@@ -31,10 +31,10 @@ def upsert_analysis_data(data):
     try:
         cursor = conn.cursor()
         
-        # Scaling helper
+        # Scaling helper (Data is already normalized to Crores by engines)
         def scale(val):
             try:
-                return float(val) * config.LAKHS_TO_CRORES
+                return float(val) 
             except (ValueError, TypeError):
                 return 0.0
 

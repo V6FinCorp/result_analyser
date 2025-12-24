@@ -107,55 +107,46 @@ def analyze_with_openai(pdf_path, api_key, max_pages=10):
 CRITICAL INSTRUCTIONS:
 1. If both "Consolidated" and "Standalone" results are present, ONLY analyze the CONSOLIDATED results.
 2. Look for the main financial results table (usually titled "Statement of Profit and Loss" or similar).
-3. All figures should be in ₹ Lakhs (Indian Rupees in Lakhs).
+3. All figures should be in ₹ Crores (Indian Rupees in Crores). If the PDF shows figures in Lakhs, divide them by 100 to get Crores.
 
- Extract the following data:
-- company_id: Look at the first page for labels like "Scrip code", "Security Code", etc. If it is a NUMBER (e.g. 513699), extract it here.
-- company_code: Look at the first page for labels like "Symbol", "NSE CODE", etc. If it is TEXT (e.g. EICHERMOT), extract it here.
-- quarter: Strictly one of "Q1", "Q2", "Q3", "Q4" based on the period end month (Mar=Q4, Jun=Q1, Sep=Q2, Dec=Q3).
-- year: The 4-digit financial year (e.g. 2025).
-- result_type: Strictly "Consolidated" or "Standalone". If both are present, ONLY extract "Consolidated".
-- Revenue from Operations
-- Other Income
-- Total Expenses
-- Operating Profit (Revenue from Operations - Total Expenses)
-- OPM % (Operating Profit / Revenue from Operations * 100)
-- Profit Before Tax
-- Net Profit
-- EPS (Earnings Per Share)
+ Extract the following data for FOUR periods (Current Quarter, Previous Quarter, Same Quarter Last Year, and Year Ended):
+- company_id: Scrip code (numeric) from Page 1.
+- company_code: Symbol (text) from Page 1.
+- quarter: Q1, Q2, Q3, or Q4.
+- year: 4-digit year.
+- result_type: Consolidated or Standalone.
+- Metrics for EACH of the 4 periods: Revenue, Other Income, Total Expenses, Operating Profit, OPM %, PBT, Net Profit, EPS.
 
-Also, scan the text and notes for Corporate Actions/Announcements:
-- Dividend: Extract ONLY the numeric value(s) of dividend declared.
-- Capex: Extract ONLY the numeric value of capital expenditure/expansion in Lakhs.
-- Management Change: Strictly "Yes" if any appointment or resignation is mentioned, otherwise "No".
-- Special Announcement: Any other critical company update.
+Also, scan for Corporate Actions:
+- Dividend: Numeric value.
+- Capex: Amount in Lakhs.
+- Management Change: "Yes" or "No".
+- Special Announcement: Text summary.
 
-Calculate Growth Metrics... (remaining logic same)
+Calculate Growth Metrics:
+- revenue_qoq, net_profit_qoq, revenue_yoy, net_profit_yoy.
 
-IMPORTANT: Return ONLY valid JSON in this exact format (ensure numeric values are numbers):
+IMPORTANT: Return ONLY valid JSON in this exact format. Ensure "table_data" has exactly 4 entries matching the periods:
 {
   "company_id": "513699",
   "company_code": "EICHERMOT",
-  "quarter": "Q2",
+  "quarter": "Q2", 
   "year": 2025,
   "result_type": "Consolidated",
   "table_data": [
-    {"period": "Current", "revenue": 295.16, "other_income": 138.41, "total_expenses": 381.43, "operating_profit": -86.27, "opm": -29.2, "pbt": 52.14, "net_profit": 39.02, "eps": 0.26},
-    ...
+    {"period": "Current", "revenue": 100.0, "other_income": 5.0, "total_expenses": 80.0, "operating_profit": 20.0, "opm": 20.0, "pbt": 25.0, "net_profit": 18.0, "eps": 2.5},
+    {"period": "Prev Qtr", "revenue": 90.0, ...},
+    {"period": "YoY Qtr", "revenue": 85.0, ...},
+    {"period": "Year Ended", "revenue": 400.0, ...}
   ],
-  "growth": { ... },
+  "growth": {
+    "revenue_qoq": 11.1, "net_profit_qoq": 5.2, "revenue_yoy": 17.6, "net_profit_yoy": 12.1
+  },
   "corporate_actions": {
-    "dividend": "4, 0.7",
-    "capex": "12345",
-    "management_change": "Yes",
-    "special_announcement": "Strategic Partnership"
+    "dividend": "4.5", "capex": "5000", "management_change": "Yes", "special_announcement": "..."
   },
   "observations": [ ... ],
-  "recommendation": {
-    "verdict": "STRONG AVOID / SELL",
-    "color": "red",
-    "reasons": [ ... ]
-  }
+  "recommendation": { "verdict": "...", "color": "...", "reasons": [...] }
 }
 
 If you cannot find certain data, use "Not mentioned" for corporate actions and 0 for numeric values. Ensure all numeric values are numbers (not strings).

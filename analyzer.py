@@ -2,517 +2,267 @@ import pdfplumber
 import re
 import pandas as pd
 import math
-
 import logging
+from pathlib import Path
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def extract_financial_data(pdf_path):
-    """
-    Extracts financial data from a PDF file.
-    Returns a dictionary with extracted metrics.
-    """
-    extracted_data = {}
-    logger.info(f"Analyzing PDF: {pdf_path}")
-    
-    with pdfplumber.open(pdf_path) as pdf:
-        # Strategy 1: Smart Table Selection
-        # Scan ALL pages and ALL tables, score them, and pick the best one.
-        candidates = [] # List of (score, page_idx, table_df)
-        
-        for i, page in enumerate(pdf.pages):
-            logger.info(f"Scanning Page {i+1} for tables...")
-            try:
-                tables = page.extract_tables(table_settings={
-                    "vertical_strategy": "text", 
-                    "horizontal_strategy": "text",
-                    "snap_tolerance": 5
-                })
-            except Exception as e:
-                logger.warning(f"Failed to extract tables from Page {i+1}: {e}")
-                continue
-            
-            for table in tables:
-                df = pd.DataFrame(table).fillna('')
-                # Clean up
-                df = df.dropna(how='all').dropna(axis=1, how='all')
-                
-                score = score_table(df, page_idx=i+1)
-                if score > 10: # Lower threshold to capture more candidates
-                    candidates.append((score, i+1, df))
-                    logger.info(f"Found candidate table on Page {i+1} with Score: {score}")
+def normalize(s):
+    return re.sub(r'[^a-zA-Z0-9]', '', str(s or "")).lower()
 
-        # Sort candidates by score (descending)
-        candidates.sort(key=lambda x: x[0], reverse=True)
+class LocalAnalyzer:
+    def __init__(self, pdf_path):
+        self.path = pdf_path
+        self.target = "Consolidated"
+        self.periods = ["Current", "Prev Qtr", "YoY Qtr", "Year Ended"]
+        self.results = { p: {
+            "revenue": 0.0, "other_income": 0.0, "total_expenses": 0.0, 
+            "operating_profit": 0.0, "opm": 0.0, "pbt": 0.0, "net_profit": 0.0, "eps": 0.0
+        } for p in self.periods }
         
-        logger.info(f"Found {len(candidates)} candidate tables. Processing in order of score...")
-        
-        for score, page_idx, df in candidates:
-            logger.info(f"Attempting to process table from Page {page_idx} (Score: {score})")
-            data = process_financial_table(df)
-            if data and data.get('table_data') and data['table_data'][0].get('revenue', 0) > 0:
-                logger.info(f"Successfully extracted data from Page {page_idx}.")
-                
-                # Also extract corporate actions from full text
-                full_text = ""
-                first_page_text = pdf.pages[0].extract_text()
-                for page in pdf.pages:
-                    full_text += page.extract_text() + "\n"
-                
-                data['corporate_actions'] = extract_corporate_actions(full_text)
-                
-                # Add identifiers and period
-                ids_period = extract_identifiers_and_period(full_text, first_page_text)
-                data.update(ids_period)
-                
-                return data
-            else:
-                logger.warning(f"Table from Page {page_idx} failed processing or had zero revenue.")
+        self.found_priority = {p: {k: 99 for k in self.results[p].keys()} for p in self.periods}
+        self.helpers = {p: {"Dep": 0.0, "Int": 0.0, "Other": 0.0, "TotalInc": 0.0} for p in self.periods}
+        self.debug_logs = []
 
-        # Strategy 2: Text-Based Extraction (Fallback)
-        logger.warning("Table extraction failed or yielded no data. Attempting text-based extraction...")
-        full_text = ""
-        for page in pdf.pages:
-            full_text += page.extract_text() + "\n"
+    def log(self, msg):
+        logger.info(msg)
+        self.debug_logs.append(msg)
+
+    def get_rows(self, page):
+        words = page.extract_words(x_tolerance=2, y_tolerance=2)
+        if not words: return []
+        rows = {}
+        for w in words:
+            y = round(w['top'], 0)
+            found = False
+            for ry in rows.keys():
+                if abs(y - ry) < 5: rows[ry].append(w); found = True; break
+            if not found: rows[y] = [w]
+        
+        res = []
+        for y in sorted(rows.keys()):
+            r_words = sorted(rows[y], key=lambda x: x['x0'])
+            parts = []
+            if r_words:
+                c_txt, c_x0, c_x1 = r_words[0]['text'], r_words[0]['x0'], r_words[0]['x1']
+                for i in range(1, len(r_words)):
+                    w = r_words[i]
+                    if (w['x0'] - c_x1) < 4: c_txt += w['text']; c_x1 = w['x1']
+                    else: parts.append((c_txt, c_x0)); c_txt, c_x0, c_x1 = w['text'], w['x0'], w['x1']
+                parts.append((c_txt, c_x0))
+            res.append(parts)
+        return res
+
+    def parse_val(self, s):
+        s = s.replace(',', '').replace('(', '-').replace(')', '').replace("'", '').strip()
+        if not re.search(r'\d', s): return None
+        if s.count('.') > 1:
+            idx = s.rfind('.')
+            s = s[:idx].replace('.', '') + s[idx:]
+        try:
+            m = re.search(r'-?\d+\.?\d*', s)
+            return float(m.group()) if m else None
+        except: return None
+
+    def analyze(self):
+        self.log(f"🔍 Analyzing: {Path(self.path).name}")
+        with pdfplumber.open(self.path) as pdf:
+            first_page_text = pdf.pages[0].extract_text() or ""
+            txt_all = "".join([p.extract_text() or "" for p in pdf.pages[:min(12, len(pdf.pages))]]).lower()
+            self.target = "Consolidated" if "consolidated" in txt_all else "Standalone"
+            self.log(f"🎯 Target Result Type: {self.target}")
             
-        corporate_actions = extract_corporate_actions(full_text)
-        data = extract_from_text(full_text)
-        if data and data.get('revenue', 0) > 0:
-            logger.info("Successfully extracted data from text.")
-            wrapped_data = {
-                'table_data': [{'period': 'Current', **data}],
-                'growth': {},
-                'corporate_actions': corporate_actions,
-                'observations': ["⚠️ Extracted from text. Comparison data unavailable."],
-                'recommendation': generate_recommendation(data, [])
+            # Global Scale Filter
+            global_scale = 1.0
+            if "crore" in txt_all: 
+                global_scale = 1.0
+                self.log("📏 Global Scale: Crores (No conversion)")
+            elif any(x in txt_all for x in ["lakh", "lac", "lacs"]): 
+                global_scale = 100.0
+                self.log("📏 Global Scale: Lakhs (Will divide by 100)")
+            
+            mapping = {
+                "revenue": [("revenuefromoperations", 1), ("incomefromoperations", 2), ("netsales", 3)],
+                "TotalInc": [("totalincome", 1), ("totalrevenue", 1)],
+                "total_expenses": [("totalexpenses", 1), ("totalexpenditure", 2)],
+                "pbt": [("profitbeforetax", 1), ("profitlossbeforetax", 2), ("pbt", 3), ("profitbeforeexceptional", 4)],
+                "net_profit": [("netprofit", 1), ("profitfortheperiod", 1), ("profitaftertax", 3), ("profitfortheyear", 1), ("profi", 5)],
+                "eps": [("basicearningspershare", 1), ("basiceps", 1), ("earningpershare", 2), ("basic", 3)],
+                "Dep": [("depreciation", 1)], 
+                "Int": [("financecost", 1), ("interestcost", 1)], 
+                "other_income": [("otherincome", 1)]
             }
-            return wrapped_data
 
-    logger.error("No valid financial data found.")
-    return {
-        'error': 'No valid financial data found in the PDF. Please try AI mode or check if the PDF contains financial tables.',
-        'table_data': [],
-        'growth': {},
-        'corporate_actions': {},
-        'observations': [],
-        'recommendation': {
-            'verdict': 'UNABLE TO ANALYZE',
-            'color': 'red',
-            'reasons': ['No financial data could be extracted from the PDF']
-        }
-    }
+            best_pages = []
+            for i, page in enumerate(pdf.pages):
+                text = page.extract_text()
+                if not text: continue
+                txt = text.lower()
+                score = 0
+                if "ended" in txt: score += 50
+                if "particulars" in txt: score += 50
+                if self.target.lower() in txt: score += 100
+                if score >= 100:
+                    best_pages.append((i, page))
+
+            if not best_pages:
+                self.log("⚠️ No high-confidence result pages found.")
+            
+            for page_idx, page in best_pages:
+                self.log(f"📄 Processing Page {page_idx + 1}...")
+                txt = page.extract_text().lower()
+                is_con = "consolidated" in txt
+                prio = 1 if is_con else (2 if "standalone" in txt else 3)
+                
+                # Page-specific scale override
+                page_scale = global_scale
+                scale_area = re.search(r'in\s*(lakh|lac|crore|million|rs|rupee)', txt)
+                if scale_area:
+                    skw = scale_area.group(1)
+                    if "crore" in skw: page_scale = 1.0
+                    elif "lakh" in skw or "lac" in skw: page_scale = 100.0
+                
+                rows = self.get_rows(page)
+                self.log(f"📊 Found {len(rows)} text rows on page.")
+                
+                for r in rows:
+                    nums = []
+                    for t, x in r:
+                        v = self.parse_val(t)
+                        if v is not None: nums.append((v, x))
+                    
+                    if not nums: continue
+                    
+                    r_str = " ".join([p[0] for p in r])
+                    match = re.search(r'-?\d', r_str)
+                    lbl_text = r_str[:match.start()] if match else r_str
+                    lbl = normalize(lbl_text)
+                    
+                    target_key = None
+                    for k, kws in mapping.items():
+                        for kw, rk in kws:
+                            if normalize(kw) in lbl:
+                                if k == "Int" and "income" in lbl: continue
+                                if k == "net_profit" and any(x in lbl for x in ["comprehensive", "minority", "equity"]): continue
+                                target_key = k; break
+                        if target_key: break
+                    
+                    if target_key:
+                        self.log(f"✅ Found Metric: {target_key} (Labels: '{lbl_text.strip()}')")
+                        for i, (val, x) in enumerate(nums[:4]):
+                            p_name = self.periods[i]
+                            # Normalization: If Lakhs -> Crores (div 100). If EPS -> No conversion.
+                            divisor = 1.0 if (target_key == "eps" or page_scale == 1.0) else 100.0
+                            s_val = round(val / divisor, 2)
+                            
+                            if target_key in ["Dep", "Int", "TotalInc"]:
+                                if self.helpers[p_name][target_key] == 0: 
+                                    self.helpers[p_name][target_key] = s_val
+                            else:
+                                curr_prio = self.found_priority[p_name].get(target_key, 99)
+                                if prio < curr_prio or (prio == curr_prio and self.results[p_name][target_key] == 0):
+                                    self.results[p_name][target_key] = s_val
+                                    self.found_priority[p_name][target_key] = prio
+                                    self.log(f"   ∟ {p_name}: {s_val} Cr")
+
+            # Post-processing
+            self.log("🔧 Finalizing calculations...")
+            for p in self.periods:
+                if self.results[p]["revenue"] == 0 and self.helpers[p]["TotalInc"] != 0:
+                    self.results[p]["revenue"] = round(self.helpers[p]["TotalInc"] - self.results[p]["other_income"], 2)
+                
+                if self.results[p]["operating_profit"] == 0 and self.results[p]["revenue"] != 0:
+                    self.results[p]["operating_profit"] = round(
+                        self.results[p]["pbt"] + self.helpers[p]["Dep"] + self.helpers[p]["Int"] - self.results[p]["other_income"], 2
+                    )
+                
+                if self.results[p]["revenue"] != 0:
+                    self.results[p]["opm"] = round((self.results[p]["operating_profit"] / self.results[p]["revenue"]) * 100, 2)
+
+            table_data = []
+            for p in self.periods:
+                row = self.results[p]
+                row['period'] = p
+                table_data.append(row)
+
+            full_text = ""
+            for p in pdf.pages: full_text += (p.extract_text() or "") + "\n"
+            
+            ids = extract_identifiers_and_period(full_text, first_page_text)
+            self.log(f"🆔 Company ID: {ids['company_id']} | Code: {ids['company_code']}")
+            
+            actions = extract_corporate_actions(full_text)
+            output = analyze_results(table_data)
+            output.update(ids)
+            output['corporate_actions'] = actions
+            output['debug_logs'] = self.debug_logs
+            output['result_type'] = self.target
+            
+            return output
+
+def extract_financial_data(pdf_path):
+    analyzer = LocalAnalyzer(pdf_path)
+    return analyzer.analyze()
 
 def extract_corporate_actions(text):
-    """Extracts corporate actions like dividends, capex, etc. using keywords."""
-    actions = {
-        "dividend": "Not mentioned",
-        "capex": "Not mentioned",
-        "management_change": "Not mentioned",
-        "new_projects": "Not mentioned",
-        "special_announcement": "Not mentioned"
-    }
-    
+    actions = {"dividend": "Not mentioned", "capex": "Not mentioned", "management_change": "No", "special_announcement": "Not mentioned"}
     lines = text.split('\n')
-    
-    # Dividend
     for line in lines:
-        if any(k in line.lower() for k in ['dividend', 'declared', 'interim dividend', 'final dividend']):
-            # Try to extract numbers like 4, 0.7 or 2.50
-            matches = re.findall(r'\d+(?:\.\d+)?', line)
-            if matches:
-                actions['dividend'] = ", ".join(matches)
-                break
-                
-    # Capex
-    for line in lines:
-        if any(k in line.lower() for k in ['capex', 'capital expenditure', 'expansion', 'new plant', 'capacity']):
-            # Try to extract large numbers
-            matches = re.findall(r'\d+(?:,\d+)*(?:\.\d+)?', line)
-            if matches:
-                # Pick the largest number as it's likely the capex amount
-                clean_matches = [m.replace(',', '') for m in matches]
-                nums = [float(m) for m in clean_matches if float(m) > 10]
-                if nums:
-                    actions['capex'] = f"{max(nums):,.0f}"
-                    break
-            
-    # Management
-    actions['management_change'] = "No"
-    for line in lines:
-        if any(k in line.lower() for k in ['appointment', 'resignation', 'ceo', 'cfo', 'director', 'managing director']):
+        l = line.lower()
+        if any(k in l for k in ['dividend', 'declared']):
+            m = re.findall(r'\d+(?:\.\d+)?', line)
+            if m: actions['dividend'] = ", ".join(m)
+        if any(k in l for k in ['capex', 'capital expenditure', 'expansion']):
+            m = re.findall(r'\d+(?:,\d+)*(?:\.\d+)?', line)
+            if m: actions['capex'] = max([float(x.replace(',', '')) for x in m])
+        if any(k in l for k in ['appointment', 'resignation', 'ceo', 'cfo', 'director']):
             actions['management_change'] = "Yes"
-            break
-            
-    # New Projects (Keep tracking but not in separate SQL column per request)
-    actions['new_projects'] = "Not mentioned"
-    for line in lines:
-        if any(k in line.lower() for k in ['new order', 'contract', 'project', 'awarded', 'segment']):
-            actions['new_projects'] = line.strip()
-            break
-
-    # Special Announcement
-    for line in lines:
-        if any(k in line.lower() for k in ['special', 'announcement', 'strategic', 'partnership', 'acquisition', 'merger']):
-            actions['special_announcement'] = line.strip()
-            break
-            
     return actions
 
 def extract_identifiers_and_period(text, first_page_text):
-    """
-    Extracts company identifiers from the first page and 
-    financial period (Quarter/Year) from the full text.
-    """
-    results = {
-        "company_id": None,
-        "company_code": None,
-        "quarter": "Q1",
-        "year": 2025
-    }
+    res = {"company_id": None, "company_code": None, "quarter": "Q1", "year": 2025}
+    m = re.search(r"(?:Scrip code no:|Security Code:|Scrip code:)\s*(\d{6})", first_page_text, re.I)
+    if m: res["company_id"] = m.group(1)
+    m = re.search(r"(?:Symbol:|NSE Symbol :|NSE CODE:)\s*([A-Z0-9]+)", first_page_text, re.I)
+    if m: res["company_code"] = m.group(1)
     
-    # 1. Extract Identifiers from Page 1
-    # Patterns for numeric Scrip Codes
-    id_patterns = [
-        r"(?:Scrip code no:|Security Code:|Scrip code:|Scrip Code:|BSE Scrip Code:|BSE STOCK CODE:)\s*(\d{6})",
-        r"Scrip code\s*:\s*(\d{6})",
-        r"Security Code\s*:\s*(\d{6})"
-    ]
-    for pattern in id_patterns:
-        match = re.search(pattern, first_page_text, re.IGNORECASE)
-        if match:
-            results["company_id"] = match.group(1)
-            break
-            
-    # Patterns for Alphabetic Symbols
-    code_patterns = [
-        r"(?:Symbol:|NSE Symbol :|NSE CODE:|NSE Symbol:)\s*([A-Z0-9]+)",
-        r"Symbol\s*:\s*([A-Z0-9]+)",
-        r"NSE CODE\s*:\s*([A-Z0-9]+)"
-    ]
-    for pattern in code_patterns:
-        match = re.search(pattern, first_page_text, re.IGNORECASE)
-        if match:
-            val = match.group(1).strip()
-            # If it's a number, it might be an ID - skip if purely text is expected
-            if not val.isdigit():
-                results["company_code"] = val
-                break
-
-    # 2. Extract Period (Quarter & Year)
-    period_text = " ".join(text.split()[:500]) # Look at start of doc
-    months = {
-        "june": "Q1", "jun": "Q1",
-        "september": "Q2", "sep": "Q2",
-        "december": "Q3", "dec": "Q3",
-        "march": "Q4", "mar": "Q4"
-    }
-    
-    for month_name, qtr in months.items():
-        if month_name in period_text.lower():
-            results["quarter"] = qtr
-            break
-            
-    year_match = re.search(r"20(\d{2})", period_text)
-    if year_match:
-        results["year"] = int(year_match.group(0))
-        
-    return results
-
-def score_table(df, page_idx=0):
-    """
-    Scores a dataframe based on its likelihood of being the Financial Results table.
-    """
-    score = 0
-    df_str = df.astype(str).apply(lambda x: x.str.lower())
-    text_content = " ".join(df_str.values.flatten())
-    
-    # CRITICAL: Prioritize Consolidated over Standalone
-    if 'consolidated' in text_content:
-        score += 200
-        logger.info(f"Page {page_idx}: CONSOLIDATED results detected (+200 bonus)")
-    elif 'standalone' in text_content:
-        score -= 100
-        logger.info(f"Page {page_idx}: Standalone results detected (-100 penalty)")
-    
-    # Keyword Scoring
-    keywords = {
-        'revenue': 10, 'sales': 10, 'income from operations': 15,
-        'profit': 10, 'loss': 10, 'net profit': 20,
-        'expenses': 10, 'expenditure': 10,
-        'tax': 5, 'eps': 10, 'earnings per share': 15,
-        'quarter': 5, 'ended': 5
-    }
-    
-    for kw, points in keywords.items():
-        if kw in text_content:
-            score += points
-            
-    # Structure Scoring
-    # 1. Must have multiple columns (Particulars + Data)
-    if df.shape[1] < 2:
-        return 0
-        
-    # 2. Numeric Density: Check if columns 1+ contain mostly numbers
-    numeric_cols = 0
-    for col in df.columns[1:]:
-        numeric_count = 0
-        total_count = 0
-        for val in df[col]:
-            val_str = str(val).strip()
-            if not val_str: continue
-            total_count += 1
-            # Check if it looks like a number (allow commas, brackets)
-            clean = val_str.replace(',', '').replace('(', '').replace(')', '')
-            try:
-                float(clean)
-                numeric_count += 1
-            except: pass
-            
-        if total_count > 0 and (numeric_count / total_count) > 0.4:
-            numeric_cols += 1
-            
-    if numeric_cols > 0:
-        score += (numeric_cols * 5)
-    else:
-        score -= 20
-        
-    return score
-
-def process_financial_table(df):
-    """Process dataframe to extract metrics for multiple periods."""
-    df = df.astype(str)
-    
-    # Identify Particulars Column
-    particulars_col_idx = -1
-    for i, col in enumerate(df.columns):
-        col_text = " ".join(df[col].astype(str)).lower()
-        # Added 'particulars' to be more robust based on user screenshot
-        if 'particulars' in col_text or 'revenue' in col_text or 'profit' in col_text or 'expenses' in col_text:
-            particulars_col_idx = i
-            break
-            
-    if particulars_col_idx == -1:
-        lengths = df.apply(lambda x: x.str.len().mean())
-        particulars_col_idx = lengths.idxmax()
-
-    # Identify Data Columns (All columns with >3 numbers, excluding Sr No)
-    data_col_indices = []
-    for i, col in enumerate(df.columns):
-        if i == particulars_col_idx: continue
-        
-        numeric_values = []
-        for val in df[col]:
-            lines = str(val).split('\n')
-            for line in lines:
-                clean = line.replace(',', '').replace('(', '-').replace(')', '').strip()
-                try:
-                    val_float = float(clean)
-                    numeric_values.append(val_float)
-                except: pass
-        
-        if len(numeric_values) > 3:
-            # Heuristic to filter out Sr No column:
-            # If max value is small (< 50) and all are integers, it's likely an index
-            if max(numeric_values) < 50 and all(v.is_integer() for v in numeric_values):
-                continue
-            data_col_indices.append(i)
-            
-    if not data_col_indices: return None
-
-    logger.info(f"Using Particulars Col: {particulars_col_idx}, Data Cols: {data_col_indices}")
-
-    # Helper to find value in a specific column
-    def find_val(keywords, col_idx):
-        for _, row in df.iterrows():
-            cell_text = str(row[particulars_col_idx])
-            lines = cell_text.split('\n')
-            
-            match_line_idx = -1
-            for idx, line in enumerate(lines):
-                if any(k.lower() in line.lower() for k in keywords):
-                    match_line_idx = idx
-                    break
-            
-            if match_line_idx != -1:
-                val_cell = str(row[col_idx])
-                val_lines = val_cell.split('\n')
-                val_lines = [l.strip() for l in val_lines if l.strip()]
-                
-                if not val_lines: continue
-                if len(lines) == 0: continue
-                
-                ratio = len(val_lines) / len(lines)
-                target_idx = math.floor(match_line_idx * ratio)
-                target_idx = min(target_idx, len(val_lines) - 1)
-                target_idx = max(target_idx, 0)
-                
-                val_str = val_lines[target_idx]
-                try:
-                    clean_val = val_str.replace(',', '').replace('(', '-').replace(')', '').strip()
-                    return float(clean_val)
-                except: continue
-        return 0.0
-
-    # Extract for all identified columns (up to 4: Current, Prev, YoY, YearEnd)
-    periods = ['Current', 'Prev Qtr', 'YoY Qtr', 'Year Ended']
-    extracted_results = []
-    
-    for i, col_idx in enumerate(data_col_indices[:4]):
-        period_name = periods[i] if i < len(periods) else f"Period {i+1}"
-        
-        revenue = find_val(['Revenue from Operations', 'Income from Operations', 'Total Revenue'], col_idx)
-        if revenue < 1.0: revenue = find_val(['Total Income'], col_idx)
-        
-        other_income = find_val(['Other Income'], col_idx)
-        total_expenses = find_val(['Total Expenses', 'Total Expenditure'], col_idx)
-        pbt = find_val(['Profit before Tax', 'Profit / (Loss) before Tax', 'Profit Before Exceptional'], col_idx)
-        net_profit = find_val(['Net Profit', 'Profit for the period', 'Profit after Tax', 'Profit / (Loss) for the period', 'Profi/'], col_idx)
-        eps = find_val(['Earnings Per Share', 'EPS', 'Basic'], col_idx)
-        
-        operating_profit = revenue - total_expenses
-        opm = (operating_profit / revenue * 100) if revenue > 0 else 0
-        
-        extracted_results.append({
-            'period': period_name,
-            'revenue': revenue,
-            'other_income': other_income,
-            'total_expenses': total_expenses,
-            'operating_profit': operating_profit,
-            'opm': opm,
-            'pbt': pbt,
-            'net_profit': net_profit,
-            'eps': eps
-        })
-
-    return analyze_results(extracted_results)
+    m = re.search(r"(june|september|december|march|jun|sep|dec|mar)\s*(20\d{2})", text.lower()[:2000])
+    if m:
+        mo = m.group(1)
+        res["quarter"] = {"jun":"Q1","sep":"Q2","dec":"Q3","mar":"Q4"}.get(mo[:3], "Q1")
+        res["year"] = int(m.group(2))
+    return res
 
 def analyze_results(results):
-    """Analyze the extracted multi-period data to generate insights."""
     if not results: return {}
+    curr, prev, yoy = results[0], results[1], results[2]
+    growth = {
+        "revenue_qoq": round(((curr['revenue'] - prev['revenue'])/prev['revenue']*100), 2) if prev['revenue'] else 0,
+        "net_profit_qoq": round(((curr['net_profit'] - prev['net_profit'])/prev['net_profit']*100), 2) if prev['net_profit'] else 0,
+        "revenue_yoy": round(((curr['revenue'] - yoy['revenue'])/yoy['revenue']*100), 2) if yoy['revenue'] else 0,
+        "net_profit_yoy": round(((curr['net_profit'] - yoy['net_profit'])/yoy['net_profit']*100), 2) if yoy['net_profit'] else 0,
+    }
     
-    current = results[0]
-    prev = results[1] if len(results) > 1 else None
-    yoy = results[2] if len(results) > 2 else None
-    
-    # Growth Calculation
-    growth = {}
-    if prev:
-        growth['revenue_qoq'] = ((current['revenue'] - prev['revenue']) / prev['revenue'] * 100) if prev['revenue'] else 0
-        growth['net_profit_qoq'] = ((current['net_profit'] - prev['net_profit']) / prev['net_profit'] * 100) if prev['net_profit'] else 0
-    
-    if yoy:
-        growth['revenue_yoy'] = ((current['revenue'] - yoy['revenue']) / yoy['revenue'] * 100) if yoy['revenue'] else 0
-        growth['net_profit_yoy'] = ((current['net_profit'] - yoy['net_profit']) / yoy['net_profit'] * 100) if yoy['net_profit'] else 0
-        
-    # Generate Observations
     observations = []
-    
-    # 1. Operating Profit Check
-    if current['operating_profit'] < 0:
-        observations.append(f"🚨 **CRITICAL RED FLAG: Operating Loss** of {current['operating_profit']:.2f} Lakhs. Core business is bleeding.")
-    
-    # 2. OPM Check
-    if current['opm'] < 0:
-        observations.append(f"⚠️ **Margin Collapse:** Operating Profit Margin (OPM) is negative at {current['opm']:.1f}%.")
-    elif yoy and current['opm'] < yoy['opm']:
-        observations.append(f"⚠️ **Margin Compression:** OPM fell to {current['opm']:.1f}% from {yoy['opm']:.1f}% YoY.")
-        
-    # 3. Other Income Dependency
-    if current['net_profit'] > 0 and current['operating_profit'] < 0:
-        observations.append(f"⚠️ **Masked Earnings:** Net Profit is positive only due to Other Income ({current['other_income']:.2f}).")
-        
-    # 4. Revenue Growth
-    if growth.get('revenue_qoq', 0) < -10:
-        observations.append(f"📉 **Revenue Collapse:** Revenue crashed {growth['revenue_qoq']:.1f}% QoQ.")
-        
-    # 5. Expense Check
-    if yoy and current['total_expenses'] > yoy['total_expenses'] and current['revenue'] < yoy['revenue']:
-        observations.append("⚠️ **Expense Mismanagement:** Expenses increased YoY while Revenue declined.")
-
-    return {
-        'table_data': results,
-        'growth': growth,
-        'observations': observations,
-        'recommendation': generate_recommendation(current, observations)
-    }
-
-def extract_from_text(text):
-    """Parse raw text to find financial metrics."""
-    lines = text.split('\n')
-    
-    def find_val_in_text(keywords):
-        for line in lines:
-            if any(k.lower() in line.lower() for k in keywords):
-                matches = re.findall(r'(?<!\d)\(?\d{1,3}(?:,\d{3})*\.?\d*\)?(?!\d)', line)
-                valid_numbers = []
-                for match in matches:
-                    try:
-                        clean = match.replace(',', '').replace('(', '-').replace(')', '')
-                        val = float(clean)
-                        if len(valid_numbers) == 0 and val < 20 and val.is_integer(): continue
-                        valid_numbers.append(val)
-                    except: continue
-                
-                if len(valid_numbers) >= 2:
-                    return valid_numbers[0]
-        return 0.0
-
-    return calculate_metrics(find_val_in_text)
-
-def calculate_metrics(finder_func):
-    """Common logic to calculate metrics using a finder function."""
-    revenue = finder_func(['Revenue from Operations', 'Income from Operations', 'Total Revenue'])
-    if revenue < 1.0: revenue = finder_func(['Total Income'])
-    
-    other_income = finder_func(['Other Income'])
-    total_expenses = finder_func(['Total Expenses', 'Total Expenditure'])
-    pbt = finder_func(['Profit before Tax', 'Profit / (Loss) before Tax', 'Profit Before Exceptional'])
-    
-    # Added 'Profi/' to handle typo in PDF
-    net_profit = finder_func(['Net Profit', 'Profit for the period', 'Profit after Tax', 'Profit / (Loss) for the period', 'Profi/'])
-    
-    eps = finder_func(['Earnings Per Share', 'EPS', 'Basic'])
-    
-    operating_profit = revenue - total_expenses
-    opm = (operating_profit / revenue * 100) if revenue > 0 else 0
+    if curr['operating_profit'] < 0: observations.append("🚨 CRITICAL RED FLAG: Operating Loss.")
+    if curr['opm'] < 0: observations.append("⚠️ Margin Collapse.")
     
     return {
-        'revenue': revenue,
-        'other_income': other_income,
-        'total_expenses': total_expenses,
-        'operating_profit': operating_profit,
-        'opm': opm,
-        'pbt': pbt,
-        'net_profit': net_profit,
-        'eps': eps
+        "table_data": results,
+        "growth": growth,
+        "observations": observations,
+        "recommendation": generate_recommendation(curr, observations)
     }
 
-def generate_recommendation(data, observations):
-    """Generates investment recommendation based on data and observations."""
+def generate_recommendation(data, obs):
     score = 0
-    reasons = []
+    for o in obs:
+        if "CRITICAL" in o: score -= 5
+        elif "⚠️" in o: score -= 2
+    if data['net_profit'] > 0: score += 2
     
-    # Negative scoring based on critical observations
-    for obs in observations:
-        if "CRITICAL" in obs: score -= 5
-        if "Margin" in obs: score -= 2
-        if "Masked" in obs: score -= 3
-        if "Collapse" in obs: score -= 2
-        
-    # Base Financials
-    if data['net_profit'] > 0: score += 1
-    if data['operating_profit'] > 0: score += 2
-    
-    if score >= 2:
-        verdict = "BUY / ACCUMULATE"
-        color = "green"
-    elif score > -3:
-        verdict = "HOLD / NEUTRAL"
-        color = "orange"
-    else:
-        verdict = "STRONG AVOID / SELL"
-        color = "red"
-        
-    return {'verdict': verdict, 'color': color, 'reasons': observations}
+    if score >= 2: return {"verdict": "BUY / ACCUMULATE", "color": "green", "reasons": obs}
+    if score > -3: return {"verdict": "HOLD / NEUTRAL", "color": "orange", "reasons": obs}
+    return {"verdict": "STRONG AVOID / SELL", "color": "red", "reasons": obs}

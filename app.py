@@ -3,7 +3,7 @@ import os
 from werkzeug.utils import secure_filename
 from analyzer import extract_financial_data
 from browser_utils import download_pdf_from_url
-from database_utils import upsert_analysis_data
+from database_utils import upsert_analysis_data, get_all_analysis_data
 
 import logging
 
@@ -23,6 +23,11 @@ os.makedirs(app.config['DOWNLOAD_FOLDER'], exist_ok=True)
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/database')
+def database_view():
+    data = get_all_analysis_data()
+    return render_template('database.html', data=data)
 
 @app.route('/favicon.ico')
 def favicon():
@@ -80,14 +85,18 @@ def analyze():
     
     # Get API key from form (required for AI and smart modes)
     if processing_mode in ['ai', 'smart']:
-        if 'api_key' in request.form:
-            api_key = request.form['api_key'].strip()
+        api_key = request.form.get('api_key', '').strip() if request.form.get('api_key') else None
         
         if not api_key:
             return jsonify({'error': 'OpenAI API key is required for AI and Smart modes.'}), 400
         
         if not api_key.startswith('sk-'):
             return jsonify({'error': 'Invalid API key format. OpenAI keys start with "sk-"'}), 400
+    
+    # Get Optional Analysis Flags
+    include_corp_actions = request.form.get('include_corp_actions') == 'true'
+    include_observations = request.form.get('include_observations') == 'true'
+    include_recommendations = request.form.get('include_recommendations') == 'true'
     
     # Handle File Upload
     if 'file' in request.files and request.files['file'].filename != '':
@@ -109,40 +118,57 @@ def analyze():
     
     # Process the PDF
     try:
+        # 1. Pre-extraction to get identifiers (Fast)
+        from analyzer import extract_identifiers_and_period
+        import pdfplumber
+        with pdfplumber.open(file_path) as pdf:
+            first_page_text = pdf.pages[0].extract_text() or ""
+            full_text_start = "".join([p.extract_text() or "" for p in pdf.pages[:3]])
+            ids = extract_identifiers_and_period(full_text_start, first_page_text)
+        
+        # 2. Check Database Cache
+        if ids.get('company_id') and ids.get('quarter') and ids.get('year'):
+            from database_utils import get_analysis_data
+            cached_data = get_analysis_data(ids['company_id'], ids['quarter'], ids['year'])
+            if cached_data:
+                logger.info(f"♻️ Found cached results for {ids['company_id']} ({ids['quarter']} {ids['year']})")
+                cached_data['processing_method'] = 'Database (Cached)'
+                cached_data['cost_saved'] = True
+                return jsonify(cached_data)
+
+        # 3. Proceed with Analysis if not cached
+        analyzer_options = {
+            'include_corp_actions': include_corp_actions,
+            'include_observations': include_observations,
+            'include_recommendations': include_recommendations
+        }
+
         if processing_mode == 'smart':
-            # SMART MODE: Try local first, fallback to AI if needed
             logger.info("🧠 Starting SMART mode - trying local extraction first...")
-            data = extract_financial_data(file_path)
+            data = extract_financial_data(file_path, **analyzer_options)
             
             if is_high_confidence(data):
-                logger.info("✅ Local extraction successful - using local results (COST: $0)")
+                logger.info("✅ Local extraction successful")
                 data['processing_method'] = 'Local'
                 data['cost_saved'] = True
             else:
-                logger.warning("⚠️ Low confidence in local results - falling back to AI...")
+                logger.warning("⚠️ Low confidence - falling back to AI...")
                 from openai_analyzer import analyze_with_openai
-                ai_data = analyze_with_openai(file_path, api_key, max_pages=ai_page_limit)
+                ai_data = analyze_with_openai(file_path, api_key, max_pages=ai_page_limit, **analyzer_options)
                 ai_data['processing_method'] = 'AI (Fallback)'
                 ai_data['cost_saved'] = False
-                ai_data['fallback_reason'] = 'Local extraction had low confidence'
-                # Merge local logs into AI data for debugging
                 if 'debug_logs' in data:
                     ai_data['debug_logs'] = data['debug_logs'] + ai_data.get('debug_logs', [])
                 data = ai_data
-                logger.info("✅ AI analysis completed successfully")
                 
         elif processing_mode == 'ai':
-            # AI MODE: Direct AI analysis
             from openai_analyzer import analyze_with_openai
-            logger.info(f"🤖 Starting AI-based analysis (max {ai_page_limit} pages)...")
-            data = analyze_with_openai(file_path, api_key, max_pages=ai_page_limit)
+            data = analyze_with_openai(file_path, api_key, max_pages=ai_page_limit, **analyzer_options)
             data['processing_method'] = 'AI'
             data['cost_saved'] = False
             
         else:  # local mode
-            # LOCAL MODE: Only local extraction
-            logger.info("⚡ Starting Local-based analysis...")
-            data = extract_financial_data(file_path)
+            data = extract_financial_data(file_path, **analyzer_options)
             data['processing_method'] = 'Local'
             data['cost_saved'] = True
         
@@ -152,7 +178,7 @@ def analyze():
             logger.error(f"Analysis error: {error_msg}")
             return jsonify({'error': error_msg}), 400
             
-        # --- NEW: Save to Database ---
+        # --- Save to Database ---
         try:
             db_success = upsert_analysis_data(data)
             data['saved_to_db'] = db_success

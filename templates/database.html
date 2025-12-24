@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database View - Quarterly Results Analyser</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        .db-container {
+            max-width: 100%;
+            margin: 0 auto;
+        }
+
+        .controls-bar {
+            background-color: var(--card-bg);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid var(--border-color);
+        }
+
+        .search-box {
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            width: 250px;
+        }
+
+        .search-box::placeholder {
+            color: var(--text-muted);
+        }
+
+        .toggle-menu {
+            position: relative;
+            display: inline-block;
+        }
+
+        .toggle-btn {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .toggle-btn:hover {
+            border-color: var(--primary);
+        }
+
+        .toggle-content {
+            display: none;
+            position: absolute;
+            right: 0;
+            background-color: var(--card-bg);
+            min-width: 250px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+            z-index: 1;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .toggle-content.show {
+            display: block;
+        }
+
+        .toggle-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0;
+            color: var(--text-main);
+            font-size: 0.9rem;
+        }
+
+        .db-table-wrapper {
+            overflow-x: auto;
+            background-color: var(--card-bg);
+            border-radius: 0.5rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .db-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+
+        .db-table th,
+        .db-table td {
+            padding: 0.75rem 1rem;
+            text-align: right;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .db-table th {
+            background-color: #0f172a;
+            color: var(--text-muted);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            text-align: left;
+        }
+
+        .db-table td {
+            text-align: right;
+        }
+
+        .db-table td.text-left {
+            text-align: left;
+        }
+
+        .db-table tr:hover {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .hidden-col {
+            display: none;
+        }
+
+        .back-link {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .growth-pos {
+            color: var(--success);
+        }
+
+        .growth-neg {
+            color: var(--danger);
+        }
+
+        .sortable {
+            cursor: pointer;
+            position: relative;
+            padding-right: 20px;
+            /* Space for sort icon */
+        }
+
+        .sortable::after {
+            content: '';
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            border: 4px solid transparent;
+            opacity: 0.4;
+        }
+
+        .sortable.asc::after {
+            border-top-color: var(--text-main);
+            opacity: 1;
+        }
+
+        .sortable.desc::after {
+            border-bottom-color: var(--text-main);
+            opacity: 1;
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <h1>Quarterly Results Analyser</h1>
+        <p>Extract and compare financial results from PDF reports with precision.</p>
+    </header>
+
+    <nav class="navbar" style="justify-content: right;">
+        <div class="nav-menu">
+            <a href="/" class="nav-link">Analyser</a>
+            <a href="/database" class="nav-link active">Database</a>
+        </div>
+    </nav>
+
+    <div class="db-container">
+        <div class="controls-bar">
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <div>
+                    <strong>Total Records:</strong> <span id="record-count">{{ data|length }}</span>
+                </div>
+                <input type="text" id="search-box" class="search-box" placeholder="Search company, code..."
+                    onkeyup="filterTable()">
+            </div>
+
+            <div class="toggle-menu">
+                <button class="toggle-btn" onclick="toggleMenu()">👁️ Show/Hide Columns</button>
+                <div id="column-toggles" class="toggle-content">
+                    <!-- Checkboxes will be generated here -->
+                </div>
+            </div>
+        </div>
+
+        <div class="db-table-wrapper">
+            <table class="db-table" id="results-table">
+                <thead>
+                    <tr>
+                        <th class="sortable" onclick="sortTable(0)" data-col="code">Company Code</th>
+                        <th class="sortable" onclick="sortTable(1)" data-col="quarter">Quarter</th>
+                        <th class="sortable" onclick="sortTable(2)" data-col="year">Year</th>
+                        <th class="sortable" onclick="sortTable(3)" data-col="type">Type</th>
+                        <th class="sortable" onclick="sortTable(4)" data-col="sales">Sales (Cr)</th>
+                        <th class="sortable" onclick="sortTable(5)" data-col="sales_qoq">Sales QoQ%</th>
+                        <th class="sortable" onclick="sortTable(6)" data-col="sales_yoy">Sales YoY%</th>
+                        <th class="sortable" onclick="sortTable(7)" data-col="np">Net Profit (Cr)</th>
+                        <th class="sortable" onclick="sortTable(8)" data-col="np_qoq">NP QoQ%</th>
+                        <th class="sortable" onclick="sortTable(9)" data-col="np_yoy">NP YoY%</th>
+                        <th class="sortable" onclick="sortTable(10)" data-col="eps">EPS</th>
+                        <th class="sortable" onclick="sortTable(11)" data-col="margin">Margin %</th>
+                        <th class="sortable" onclick="sortTable(12)" data-col="dividend">Dividend</th>
+                        <th class="sortable" onclick="sortTable(13)" data-col="capex">Capex</th>
+                        <th class="sortable" onclick="sortTable(14)" data-col="verdict">Verdict</th>
+                        <th class="sortable" onclick="sortTable(15)" data-col="date">Added On</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in data %}
+                    <tr>
+                        <td class="text-left" data-col="code">{{ row.company_code }}</td>
+                        <td class="text-left" data-col="quarter">{{ row.quarter }}</td>
+                        <td class="text-left" data-col="year">{{ row.year }}</td>
+                        <td class="text-left" data-col="type">{{ row.result_type }}</td>
+
+                        <td data-col="sales">{{ "{:,.2f}".format(row.sales) }}</td>
+
+                        <td data-col="sales_qoq"
+                            class="{{ 'growth-pos' if row.revenue_growth_qoq > 0 else 'growth-neg' }}">
+                            {{ "{:+.1f}%".format(row.revenue_growth_qoq) }}
+                        </td>
+                        <td data-col="sales_yoy"
+                            class="{{ 'growth-pos' if row.revenue_growth_yoy > 0 else 'growth-neg' }}">
+                            {{ "{:+.1f}%".format(row.revenue_growth_yoy) }}
+                        </td>
+
+                        <td data-col="np">{{ "{:,.2f}".format(row.net_profit) }}</td>
+
+                        <td data-col="np_qoq"
+                            class="{{ 'growth-pos' if row.net_profit_growth_qoq > 0 else 'growth-neg' }}">
+                            {{ "{:+.1f}%".format(row.net_profit_growth_qoq) }}
+                        </td>
+                        <td data-col="np_yoy"
+                            class="{{ 'growth-pos' if row.net_profit_growth_yoy > 0 else 'growth-neg' }}">
+                            {{ "{:+.1f}%".format(row.net_profit_growth_yoy) }}
+                        </td>
+
+                        <td data-col="eps">{{ row.eps }}</td>
+                        <td data-col="margin">{{ row.margin }}%</td>
+                        <td data-col="dividend">{{ row.dividend }}</td>
+                        <td data-col="capex">{{ row.capex }}</td>
+                        <td class="text-left" data-col="verdict">{{ row.recommendation_verdict }}</td>
+                        <td class="text-left" data-col="date">{{ row.created_at }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const columns = [
+            { id: 'code', label: 'Company Code', default: true },
+            { id: 'quarter', label: 'Quarter', default: true },
+            { id: 'year', label: 'Year', default: true },
+            { id: 'type', label: 'Type', default: false },
+            { id: 'sales', label: 'Sales', default: true },
+            { id: 'sales_qoq', label: 'Sales QoQ%', default: true },
+            { id: 'sales_yoy', label: 'Sales YoY%', default: true },
+            { id: 'np', label: 'Net Profit', default: true },
+            { id: 'np_qoq', label: 'NP QoQ%', default: true },
+            { id: 'np_yoy', label: 'NP YoY%', default: true },
+            { id: 'eps', label: 'EPS', default: true },
+            { id: 'margin', label: 'Margin %', default: false },
+            { id: 'dividend', label: 'Dividend', default: false },
+            { id: 'capex', label: 'Capex', default: false },
+            { id: 'verdict', label: 'Verdict', default: true },
+            { id: 'date', label: 'Added On', default: false }
+        ];
+
+        function initToggles() {
+            const container = document.getElementById('column-toggles');
+            columns.forEach(col => {
+                const div = document.createElement('div');
+                div.className = 'toggle-item';
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `toggle-${col.id}`;
+                checkbox.checked = col.default;
+                checkbox.onchange = () => toggleColumn(col.id, checkbox.checked);
+
+                const label = document.createElement('label');
+                label.htmlFor = `toggle-${col.id}`;
+                label.textContent = col.label;
+
+                div.appendChild(checkbox);
+                div.appendChild(label);
+                container.appendChild(div);
+
+                // Initial state
+                toggleColumn(col.id, col.default);
+            });
+        }
+
+        function toggleColumn(colId, isVisible) {
+            const cells = document.querySelectorAll(`[data-col="${colId}"]`);
+            cells.forEach(cell => {
+                if (isVisible) {
+                    cell.classList.remove('hidden-col');
+                } else {
+                    cell.classList.add('hidden-col');
+                }
+            });
+        }
+
+        function toggleMenu() {
+            document.getElementById('column-toggles').classList.toggle('show');
+        }
+
+        // Close menu when clicking outside
+        window.onclick = function (event) {
+            if (!event.target.matches('.toggle-btn') && !event.target.closest('.toggle-content')) {
+                const dropdowns = document.getElementsByClassName("toggle-content");
+                for (let i = 0; i < dropdowns.length; i++) {
+                    const openDropdown = dropdowns[i];
+                    if (openDropdown.classList.contains('show')) {
+                        openDropdown.classList.remove('show');
+                    }
+                }
+            }
+        }
+
+        function filterTable() {
+            const input = document.getElementById("search-box");
+            const filter = input.value.toUpperCase();
+            const table = document.getElementById("results-table");
+            const tr = table.getElementsByTagName("tr");
+            let visibleCount = 0;
+
+            for (let i = 1; i < tr.length; i++) {
+                let found = false;
+                const tds = tr[i].getElementsByTagName("td");
+                for (let j = 0; j < tds.length; j++) {
+                    if (tds[j]) {
+                        const txtValue = tds[j].textContent || tds[j].innerText;
+                        if (txtValue.toUpperCase().indexOf(filter) > -1) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if (found) {
+                    tr[i].style.display = "";
+                    visibleCount++;
+                } else {
+                    tr[i].style.display = "none";
+                }
+            }
+            document.getElementById("record-count").textContent = visibleCount;
+        }
+
+        let currentSortCol = -1;
+        let currentSortDir = "asc";
+
+        function sortTable(n) {
+            const table = document.getElementById("results-table");
+            let rows, switching, i, x, y, shouldSwitch, switchcount = 0;
+            switching = true;
+
+            // Determine sort direction
+            if (currentSortCol === n) {
+                currentSortDir = (currentSortDir === "asc") ? "desc" : "asc";
+            } else {
+                currentSortCol = n;
+                currentSortDir = "asc";
+            }
+
+            // Reset headers
+            const headers = table.getElementsByTagName("th");
+            for (let h of headers) {
+                h.classList.remove("asc", "desc");
+            }
+            headers[n].classList.add(currentSortDir);
+
+            while (switching) {
+                switching = false;
+                rows = table.rows;
+                for (i = 1; i < (rows.length - 1); i++) {
+                    shouldSwitch = false;
+                    x = rows[i].getElementsByTagName("TD")[n];
+                    y = rows[i + 1].getElementsByTagName("TD")[n];
+
+                    let xVal = x.textContent.trim().replace(/,/g, '').replace('%', '');
+                    let yVal = y.textContent.trim().replace(/,/g, '').replace('%', '');
+
+                    // Check if numeric
+                    const xNum = parseFloat(xVal);
+                    const yNum = parseFloat(yVal);
+
+                    if (!isNaN(xNum) && !isNaN(yNum)) {
+                        if (currentSortDir == "asc") {
+                            if (xNum > yNum) { shouldSwitch = true; break; }
+                        } else if (currentSortDir == "desc") {
+                            if (xNum < yNum) { shouldSwitch = true; break; }
+                        }
+                    } else {
+                        if (currentSortDir == "asc") {
+                            if (xVal.toLowerCase() > yVal.toLowerCase()) { shouldSwitch = true; break; }
+                        } else if (currentSortDir == "desc") {
+                            if (xVal.toLowerCase() < yVal.toLowerCase()) { shouldSwitch = true; break; }
+                        }
+                    }
+                }
+                if (shouldSwitch) {
+                    rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+                    switching = true;
+                    switchcount++;
+                } else {
+                    if (switchcount == 0 && currentSortDir == "asc") {
+                        // This block is for initial sort direction toggle if no swaps happened
+                        // It's handled by currentSortDir logic now, so this might be redundant
+                        // but kept for robustness if original logic intended a double-toggle on first click.
+                        // For a simple toggle, the currentSortDir logic above is sufficient.
+                    }
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', initToggles);
+    </script>
+</body>
+
+</html>

@@ -41,7 +41,12 @@ body {
 
 header {
     text-align: center;
-    margin-bottom: 3rem;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    padding: 1.5rem;
+    border-radius: 1rem;
+    max-width: 1300px;
+    margin: 0 auto 22px;
 }
 
 header h1 {
@@ -144,13 +149,10 @@ header p {
     font-size: 1rem;
 }
 
-.api-key-section {
-    margin-top: 1.5rem;
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--border-color);
-}
-
-.processing-mode-section {
+.api-key-section,
+.processing-mode-section,
+.optional-features-section,
+.page-limit-section {
     margin-top: 1.5rem;
     padding-top: 1.5rem;
     border-top: 1px solid var(--border-color);
@@ -170,7 +172,8 @@ header p {
     margin-bottom: 0.5rem;
 }
 
-.radio-label {
+.radio-label,
+.checkbox-label {
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -179,7 +182,13 @@ header p {
     color: var(--text-main);
 }
 
-.radio-label input[type="radio"] {
+.checkbox-group {
+    display: flex;
+    gap: 0.75rem;
+}
+
+.radio-label input[type="radio"],
+.checkbox-label input[type="checkbox"] {
     width: 1.2rem;
     height: 1.2rem;
     accent-color: var(--primary);
@@ -196,31 +205,6 @@ header p {
     font-family: monospace;
 }
 
-#api-key-input::placeholder {
-    color: var(--text-muted);
-}
-
-.api-key-note {
-    margin-top: 0.5rem;
-    font-size: 0.75rem;
-    color: var(--warning);
-    text-align: center;
-}
-
-.mode-description {
-    margin-top: 0.75rem;
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    font-style: italic;
-    line-height: 1.4;
-}
-
-.page-limit-section {
-    margin-top: 1.5rem;
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--border-color);
-}
-
 #page-limit-slider {
     width: 100%;
     height: 6px;
@@ -229,41 +213,6 @@ header p {
     outline: none;
     margin: 1rem 0;
     cursor: pointer;
-}
-
-#page-limit-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 20px;
-    height: 20px;
-    background: var(--primary);
-    border-radius: 50%;
-    cursor: pointer;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-#page-limit-slider::-moz-range-thumb {
-    width: 20px;
-    height: 20px;
-    background: var(--primary);
-    border-radius: 50%;
-    cursor: pointer;
-    border: none;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-.page-limit-info {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    margin-bottom: 0.5rem;
-}
-
-.page-limit-note {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    text-align: center;
 }
 
 #analyze-btn {
@@ -381,10 +330,6 @@ header p {
     font-weight: 600;
 }
 
-.financial-table tr:last-child td {
-    border-bottom: none;
-}
-
 /* Corporate Actions Grid */
 .corporate-actions-grid {
     display: grid;
@@ -426,11 +371,6 @@ header p {
     line-height: 1.6;
 }
 
-.observations-list li:last-child {
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--border-color);
-}
-
 /* Sidebar Styling */
 #debug-sidebar {
     width: 350px;
@@ -442,7 +382,6 @@ header p {
     top: 2rem;
     border-radius: 1rem;
     display: none;
-    /* Controlled by toggle */
     flex-direction: column;
 }
 
@@ -486,7 +425,201 @@ header p {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    margin-top: 1.5rem;
+    justify-content: center;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+/* Switch Toggle */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 22px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #334155;
+    transition: .4s;
+    border-radius: 34px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked+.slider {
+    background-color: var(--primary);
+}
+
+.orange {
+    color: var(--warning);
+}
+
+.red {
+    color: var(--danger);
+}
+
+/* Report Container */
+.section-box {
+    background-color: var(--card-bg);
+    padding: 1.5rem;
+    border-radius: 1rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--border-color);
+}
+
+.section-box h3 {
+    margin-bottom: 1rem;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Table Styles */
+.table-responsive {
+    overflow-x: auto;
+}
+
+.financial-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+}
+
+.financial-table th,
+.financial-table td {
+    padding: 1rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.financial-table th:first-child,
+.financial-table td:first-child {
+    text-align: left;
+}
+
+.financial-table th {
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+/* Corporate Actions Grid */
+.corporate-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.corporate-action-item {
+    background-color: var(--bg-color);
+    padding: 1rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border-color);
+}
+
+.corporate-action-item h4 {
+    color: var(--primary);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.corporate-action-item p {
+    font-size: 0.9rem;
+    line-height: 1.4;
+    color: var(--text-main);
+}
+
+/* Observations List */
+.observations-list {
+    list-style: none;
+}
+
+.observations-list li {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border-color);
+    line-height: 1.6;
+}
+
+/* Sidebar Styling */
+#debug-sidebar {
+    width: 350px;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    padding: 1.5rem;
+    height: 85vh;
+    position: sticky;
+    top: 2rem;
+    border-radius: 1rem;
+    display: none;
+    flex-direction: column;
+}
+
+.debug-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.debug-logs {
+    flex: 1;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    color: #a5f3fc;
+}
+
+.log-entry {
+    margin-bottom: 0.8rem;
+    padding-left: 0.75rem;
+    border-left: 2px solid #334155;
+    line-height: 1.5;
+}
+
+.log-entry.ai {
+    border-left-color: #f472b6;
+}
+
+.log-entry.local {
+    border-left-color: #34d399;
+}
+
+.log-entry.error {
+    border-left-color: #ef4444;
+}
+
+.debug-toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
     justify-content: center;
     font-size: 0.85rem;
     color: var(--text-muted);
@@ -536,4 +669,89 @@ input:checked+.slider {
 
 input:checked+.slider:before {
     transform: translateX(22px);
+}
+
+footer {
+    margin-top: 3rem;
+    padding-bottom: 2rem;
+}
+
+/* Navigation Bar */
+.navbar {
+    background-color: var(--card-bg);
+    border-bottom: 1px solid var(--border-color);
+    padding: 1rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    margin-bottom: 2rem;
+}
+
+.nav-brand {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-main);
+    text-decoration: none;
+    background: linear-gradient(to right, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.nav-menu {
+    display: flex;
+    gap: 1.5rem;
+}
+
+.nav-link {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s;
+}
+
+.nav-link:hover,
+.nav-link.active {
+    color: var(--primary);
+}
+
+/* Sortable Headers */
+th.sortable {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+}
+
+th.sortable:hover {
+    background-color: #1e293b;
+}
+
+th.sortable::after {
+    content: '↕';
+    margin-left: 5px;
+    font-size: 0.8em;
+    opacity: 0.5;
+}
+
+th.sortable.asc::after {
+    content: '↑';
+    opacity: 1;
+}
+
+th.sortable.desc::after {
+    content: '↓';
+    opacity: 1;
+}
+
+/* Search Box */
+.search-box {
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    width: 250px;
 }

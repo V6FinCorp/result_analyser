@@ -1,6 +1,6 @@
 import pdfplumber
-import re
 import pandas as pd
+import re
 import math
 import logging
 from pathlib import Path
@@ -10,11 +10,14 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 def normalize(s):
-    return re.sub(r'[^a-zA-Z0-9]', '', str(s or "")).lower()
+    return re.sub(r'[^a-z0-9]', '', s.lower())
 
 class LocalAnalyzer:
-    def __init__(self, pdf_path):
+    def __init__(self, pdf_path, include_corp_actions=False, include_observations=False, include_recommendations=False):
         self.path = pdf_path
+        self.include_corp_actions = include_corp_actions
+        self.include_observations = include_observations
+        self.include_recommendations = include_recommendations
         self.target = "Consolidated"
         self.periods = ["Current", "Prev Qtr", "YoY Qtr", "Year Ended"]
         self.results = { p: {
@@ -56,7 +59,8 @@ class LocalAnalyzer:
         return res
 
     def parse_val(self, s):
-        s = s.replace(',', '').replace('(', '-').replace(')', '').replace("'", '').strip()
+        if s is None: return None
+        s = str(s).replace(',', '').replace('(', '-').replace(')', '').replace("'", '').strip()
         if not re.search(r'\d', s): return None
         if s.count('.') > 1:
             idx = s.rfind('.')
@@ -193,8 +197,8 @@ class LocalAnalyzer:
             ids = extract_identifiers_and_period(full_text, first_page_text)
             self.log(f"🆔 Company ID: {ids['company_id']} | Code: {ids['company_code']}")
             
-            actions = extract_corporate_actions(full_text)
-            output = analyze_results(table_data)
+            actions = extract_corporate_actions(full_text) if self.include_corp_actions else {}
+            output = analyze_results(table_data, self.include_observations, self.include_recommendations)
             output.update(ids)
             output['corporate_actions'] = actions
             output['debug_logs'] = self.debug_logs
@@ -202,8 +206,8 @@ class LocalAnalyzer:
             
             return output
 
-def extract_financial_data(pdf_path):
-    analyzer = LocalAnalyzer(pdf_path)
+def extract_financial_data(pdf_path, **kwargs):
+    analyzer = LocalAnalyzer(pdf_path, **kwargs)
     return analyzer.analyze()
 
 def extract_corporate_actions(text):
@@ -228,32 +232,41 @@ def extract_identifiers_and_period(text, first_page_text):
     m = re.search(r"(?:Symbol:|NSE Symbol :|NSE CODE:)\s*([A-Z0-9]+)", first_page_text, re.I)
     if m: res["company_code"] = m.group(1)
     
-    m = re.search(r"(june|september|december|march|jun|sep|dec|mar)\s*(20\d{2})", text.lower()[:2000])
+    # Improved Quarter Detection: Handle "September, 2025" or "September 2025"
+    m = re.search(r"(june|september|december|march|jun|sep|dec|mar)[^a-z0-9]*(20\d{2})", text.lower()[:3000])
     if m:
         mo = m.group(1)
         res["quarter"] = {"jun":"Q1","sep":"Q2","dec":"Q3","mar":"Q4"}.get(mo[:3], "Q1")
         res["year"] = int(m.group(2))
     return res
 
-def analyze_results(results):
+def analyze_results(results, include_obs=False, include_rec=False):
     if not results: return {}
     curr, prev, yoy = results[0], results[1], results[2]
-    growth = {
-        "revenue_qoq": round(((curr['revenue'] - prev['revenue'])/prev['revenue']*100), 2) if prev['revenue'] else 0,
-        "net_profit_qoq": round(((curr['net_profit'] - prev['net_profit'])/prev['net_profit']*100), 2) if prev['net_profit'] else 0,
-        "revenue_yoy": round(((curr['revenue'] - yoy['revenue'])/yoy['revenue']*100), 2) if yoy['revenue'] else 0,
-        "net_profit_yoy": round(((curr['net_profit'] - yoy['net_profit'])/yoy['net_profit']*100), 2) if yoy['net_profit'] else 0,
-    }
+    
+    # Calculate growth for all metrics
+    metrics = ['revenue', 'other_income', 'total_expenses', 'operating_profit', 'opm', 'pbt', 'net_profit', 'eps']
+    growth = {}
+    for m in metrics:
+        growth[f"{m}_qoq"] = round(((curr[m] - prev[m])/prev[m]*100), 2) if prev[m] else 0
+        growth[f"{m}_yoy"] = round(((curr[m] - yoy[m])/yoy[m]*100), 2) if yoy[m] else 0
     
     observations = []
-    if curr['operating_profit'] < 0: observations.append("🚨 CRITICAL RED FLAG: Operating Loss.")
-    if curr['opm'] < 0: observations.append("⚠️ Margin Collapse.")
+    if include_obs:
+        if curr['operating_profit'] < 0: observations.append("🚨 CRITICAL RED FLAG: Operating Loss.")
+        if curr['opm'] < 0: observations.append("⚠️ Margin Collapse.")
+        if growth['revenue_qoq'] < -10: observations.append("📉 Significant Revenue decline QoQ.")
+        if growth['net_profit_yoy'] > 20: observations.append("🚀 Strong Profit growth YoY.")
+    
+    recommendation = {}
+    if include_rec:
+        recommendation = generate_recommendation(curr, observations)
     
     return {
         "table_data": results,
         "growth": growth,
         "observations": observations,
-        "recommendation": generate_recommendation(curr, observations)
+        "recommendation": recommendation
     }
 
 def generate_recommendation(data, obs):
@@ -261,6 +274,8 @@ def generate_recommendation(data, obs):
     for o in obs:
         if "CRITICAL" in o: score -= 5
         elif "⚠️" in o: score -= 2
+        elif "📉" in o: score -= 1
+        elif "🚀" in o: score += 2
     if data['net_profit'] > 0: score += 2
     
     if score >= 2: return {"verdict": "BUY / ACCUMULATE", "color": "green", "reasons": obs}

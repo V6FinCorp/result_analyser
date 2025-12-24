@@ -4,28 +4,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Stock Analyzer</title>
+    <title>Quarterly Results Analyser</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 
 <body>
     <header>
-        <h1>AI Stock Analyzer</h1>
-        <p>Upload a quarterly result PDF or provide a BSE/NSE URL for instant AI analysis.</p>
+        <h1>Quarterly Results Analyser</h1>
+        <p>Extract and compare financial results from PDF reports with precision.</p>
+    </header>
+
+    <nav class="navbar">
         <div id="result-type-container" class="hidden">
             <span id="result-type-badge"></span>
             <span id="processing-method-badge"></span>
         </div>
-    </header>
+        <div class="nav-menu" style="justify-content: right;">
+            <a href="/" class="nav-link active">Analyser</a>
+            <a href="/database" class="nav-link">Database</a>
+        </div>
+    </nav>
+
     <div class="main-layout">
         <div class="container">
 
             <div class="input-section">
-                <!-- ... (tabs and inputs same) ... -->
                 <div class="tabs">
                     <button class="tab-btn active" onclick="switchTab('upload')">Upload PDF</button>
                     <button class="tab-btn" onclick="switchTab('url')">Enter URL</button>
+
+                    <div class="debug-toggle-container">
+                        <span>Analysis Debug Mode</span>
+                        <label class="switch">
+                            <input type="checkbox" id="debug-toggle" onchange="toggleDebugMode()">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
                 </div>
 
                 <div id="upload-tab" class="tab-content active">
@@ -44,15 +60,33 @@
                     <div class="radio-group">
                         <label class="radio-label">
                             <input type="radio" name="processing_mode" value="local" onchange="toggleApiKey()">
-                            <span>⚡ Local (Fast, Free, 70% Accurate)</span>
+                            <span>⚡ Local (Fast, Free)</span>
                         </label>
                         <label class="radio-label">
                             <input type="radio" name="processing_mode" value="smart" checked onchange="toggleApiKey()">
-                            <span>🧠 Smart (Auto-Hybrid, Cost-Optimized)</span>
+                            <span>🧠 Smart (Hybrid)</span>
                         </label>
                         <label class="radio-label">
                             <input type="radio" name="processing_mode" value="ai" onchange="toggleApiKey()">
-                            <span>🤖 AI Only (Slow, Paid, 95% Accurate)</span>
+                            <span>🤖 AI Only (99% Accurate)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="optional-features-section">
+                    <p class="section-label">Optional Analysis:</p>
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="opt-corp-actions">
+                            <span>Corporate Actions & Announcements</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="opt-observations">
+                            <span>Key Observations</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="opt-recommendations">
+                            <span>AI Recommendations</span>
                         </label>
                     </div>
                 </div>
@@ -67,15 +101,7 @@
                         oninput="updatePageLimit(this.value)">
                 </div>
 
-                <div class="debug-toggle-container">
-                    <span>Analysis Debug Mode</span>
-                    <label class="switch">
-                        <input type="checkbox" id="debug-toggle" onchange="toggleDebugMode()">
-                        <span class="slider"></span>
-                    </label>
-                </div>
-
-                <button id="analyze-btn" onclick="analyzeStock()">Analyze Result</button>
+                <button id="analyze-btn" onclick="analyzeStock()">Extract Results</button>
             </div>
 
             <div id="loading" class="hidden">
@@ -84,20 +110,25 @@
             </div>
 
             <div id="result-section" class="hidden">
-                <div class="recommendation-card" id="rec-card">
+                <div class="recommendation-card hidden" id="rec-card">
                     <h2 id="verdict">BUY / SELL</h2>
                     <ul id="reasons-list"></ul>
                 </div>
 
                 <div class="report-container">
                     <div class="section-box">
-                        <h3>Quarterly Financial Comparison (₹ Lakhs)</h3>
+                        <h3 id="table-title">Quarterly Financial Results (₹ Crores)</h3>
                         <div class="table-responsive">
                             <table class="financial-table" id="comparison-table">
                                 <thead>
-                                    <tr id="table-headers">
+                                    <tr>
                                         <th>Particulars</th>
-                                        <!-- Dynamic periods will go here -->
+                                        <th>QoQ %</th>
+                                        <th>YoY %</th>
+                                        <th>Current</th>
+                                        <th>Prev Qtr</th>
+                                        <th>YoY Qtr</th>
+                                        <th>Year Ended</th>
                                     </tr>
                                 </thead>
                                 <tbody></tbody>
@@ -105,21 +136,20 @@
                         </div>
                     </div>
 
-
-                    <div class="section-box">
+                    <div class="section-box hidden" id="corp-actions-box">
                         <h3>Corporate Actions & Announcements</h3>
                         <div class="corporate-actions-grid" id="corporate-actions-section"></div>
                     </div>
 
-                    <div class="section-box">
+                    <div class="section-box hidden" id="observations-box">
                         <h3>Key Observations</h3>
                         <ul class="observations-list" id="observations-list"></ul>
                     </div>
                 </div>
             </div>
             <footer>
-                <p style="text-align: center; margin-top: 2rem; color: #64748b; font-size: 0.8rem;">Stock Analyzer v2.1
-                    (Enhanced Logic)</p>
+                <p style="text-align: center; margin-top: 2rem; color: #64748b; font-size: 0.8rem;">Dedicated Quarterly
+                    Results Analyser v3.0</p>
             </footer>
         </div>
 

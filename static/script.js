@@ -64,7 +64,7 @@ function toggleDebugMode() {
         container.style.maxWidth = '1000px';
     } else {
         sidebar.style.display = 'none';
-        container.style.maxWidth = '900px';
+        container.style.maxWidth = '1300px';
     }
 }
 
@@ -90,7 +90,7 @@ function toggleApiKey() {
     if (mode === 'local') {
         apiContainer.style.display = 'none';
         pageLimitContainer.style.display = 'none';
-        loadingText.textContent = '⚡ Extracting data locally using result_extractor engine...';
+        loadingText.textContent = '⚡ Extracting data locally...';
     } else if (mode === 'smart') {
         apiContainer.style.display = 'block';
         pageLimitContainer.style.display = 'block';
@@ -101,8 +101,6 @@ function toggleApiKey() {
         loadingText.textContent = '🤖 Full AI analysis in progress...';
     }
 }
-
-// ... (Drag and Drop Logic unchanged) ...
 
 async function analyzeStock() {
     const loading = document.getElementById('loading');
@@ -115,7 +113,7 @@ async function analyzeStock() {
     analyzeBtn.disabled = true;
 
     // Reset debug logs
-    logsContainer.innerHTML = '<div class="log-entry">Initializing analysis...</div>';
+    logsContainer.innerHTML = '<div class="log-entry">Initializing extraction...</div>';
     document.getElementById('ai-cost-badge').classList.add('hidden');
 
     const formData = new FormData();
@@ -124,6 +122,11 @@ async function analyzeStock() {
 
     const pageLimit = document.getElementById('page-limit-slider').value;
     formData.append('ai_page_limit', pageLimit);
+
+    // Optional Features
+    formData.append('include_corp_actions', document.getElementById('opt-corp-actions').checked);
+    formData.append('include_observations', document.getElementById('opt-observations').checked);
+    formData.append('include_recommendations', document.getElementById('opt-recommendations').checked);
 
     if (mode === 'ai' || mode === 'smart') {
         const apiKey = document.getElementById('api-key-input').value.trim();
@@ -143,7 +146,7 @@ async function analyzeStock() {
         const url = document.getElementById('url-input').value;
         if (!url) { alert("Enter URL."); resetUI(); return; }
         formData.append('url', url);
-        addLogEntry(`Pinching PDF from URL...`);
+        addLogEntry(`Fetching PDF from URL...`);
     }
 
     try {
@@ -186,21 +189,34 @@ function displayResult(data) {
     }
 
     // Recommendation
-    const rec = data.recommendation || { verdict: 'UNKNOWN', color: 'orange', reasons: [] };
-    const verdict = document.getElementById('verdict');
-    if (verdict) {
-        verdict.textContent = rec.verdict;
-        verdict.className = rec.color;
+    const recCard = document.getElementById('rec-card');
+    if (data.recommendation && data.recommendation.verdict && data.recommendation.verdict !== 'Not requested') {
+        recCard.classList.remove('hidden');
+        const verdict = document.getElementById('verdict');
+        verdict.textContent = data.recommendation.verdict;
+        verdict.className = data.recommendation.color;
+
+        const reasonsList = document.getElementById('reasons-list');
+        reasonsList.innerHTML = '';
+        (data.recommendation.reasons || []).forEach(reason => {
+            const li = document.createElement('li');
+            li.textContent = reason;
+            reasonsList.appendChild(li);
+        });
+    } else {
+        recCard.classList.add('hidden');
     }
 
     // Handle Debug Logs
     if (data.debug_logs) {
-        data.debug_logs.forEach(log => addLogEntry(log, 'local'));
+        data.debug_logs.forEach(log => {
+            const type = (log.includes('AI') || log.includes('🚀') || log.includes('📡') || log.includes('📥')) ? 'ai' : 'local';
+            addLogEntry(log, type);
+        });
     }
 
     if (data.processing_method.includes('AI')) {
         addLogEntry('AI analysis performed successfully.', 'ai');
-        // Simple cost estimation (estimate: $0.015 per page for GPT-4o)
         const pages = document.getElementById('page-limit-slider').value;
         const estCost = (pages * 0.015).toFixed(3);
         const costBadge = document.getElementById('ai-cost-badge');
@@ -210,25 +226,35 @@ function displayResult(data) {
         addLogEntry('Local extraction completed (Cost: $0.00)', 'local');
     }
 
-    renderTable(data.table_data || []);
-    renderCorporateActions(data.corporate_actions || {});
-    renderObservations(data.observations || []);
+    renderTable(data);
+
+    // Corporate Actions
+    const corpBox = document.getElementById('corp-actions-box');
+    if (document.getElementById('opt-corp-actions').checked && data.corporate_actions) {
+        corpBox.classList.remove('hidden');
+        renderCorporateActions(data.corporate_actions);
+    } else {
+        corpBox.classList.add('hidden');
+    }
+
+    // Observations
+    const obsBox = document.getElementById('observations-box');
+    if (document.getElementById('opt-observations').checked && data.observations && data.observations.length > 0) {
+        obsBox.classList.remove('hidden');
+        renderObservations(data.observations);
+    } else {
+        obsBox.classList.add('hidden');
+    }
 }
 
 function renderCorporateActions(actions) {
     const container = document.getElementById('corporate-actions-section');
     container.innerHTML = '';
 
-    if (!actions) {
-        container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">No corporate actions found.</p>';
-        return;
-    }
-
     const items = [
         { key: 'dividend', label: '💰 Dividend', val: actions.dividend },
         { key: 'capex', label: '🏗️ Capex/Expansion', val: actions.capex },
         { key: 'management_change', label: '👔 Management Change', val: actions.management_change },
-        { key: 'new_projects', label: '🚀 New Projects/Orders', val: actions.new_projects },
         { key: 'special_announcement', label: '📢 Special Announcement', val: actions.special_announcement }
     ];
 
@@ -240,29 +266,15 @@ function renderCorporateActions(actions) {
     });
 }
 
-function renderTable(tableData) {
-    const table = document.getElementById('comparison-table');
-    const thead = table.querySelector('thead tr');
-    const tbody = table.querySelector('tbody');
-
-    thead.innerHTML = '<th>Particulars</th>';
-    thead.innerHTML += '<th style="color: var(--primary)">QoQ %</th>';
-    thead.innerHTML += '<th style="color: var(--primary)">YoY %</th>';
+function renderTable(data) {
+    const tableData = data.table_data || [];
+    const growth = data.growth || {};
+    const tbody = document.querySelector('#comparison-table tbody');
     tbody.innerHTML = '';
 
     if (!tableData || tableData.length === 0) return;
 
-    // Identify indices for calculation
-    const current = tableData.find(d => d.period === 'Current');
-    const prev = tableData.find(d => d.period === 'Prev Qtr');
-    const yoy = tableData.find(d => d.period === 'YoY Qtr');
-
-    tableData.forEach(col => {
-        const th = document.createElement('th');
-        th.textContent = col.period;
-        thead.appendChild(th);
-    });
-
+    const periods = ['Current', 'Prev Qtr', 'YoY Qtr', 'Year Ended'];
     const metrics = [
         { key: 'revenue', label: 'Revenue from Operations' },
         { key: 'other_income', label: 'Other Income' },
@@ -277,62 +289,53 @@ function renderTable(tableData) {
     metrics.forEach(metric => {
         const tr = document.createElement('tr');
 
-        // 1. Particulars Label
+        // 1. Particulars
         const tdLabel = document.createElement('td');
         tdLabel.innerHTML = `<strong>${metric.label}</strong>`;
         tr.appendChild(tdLabel);
 
-        // 2. QoQ % Calculation & Cell
+        // 2. QoQ %
         const tdQoQ = document.createElement('td');
-        if (current && prev && prev[metric.key]) {
-            const diff = ((current[metric.key] - prev[metric.key]) / Math.abs(prev[metric.key])) * 100;
-            tdQoQ.textContent = (diff > 0 ? '+' : '') + diff.toFixed(1) + '%';
-
-            // Expense Logic: Red on increase, Green on decrease
-            if (metric.key === 'total_expenses') {
-                tdQoQ.style.color = diff <= 0 ? 'var(--success)' : 'var(--danger)';
-            } else {
-                tdQoQ.style.color = diff >= 0 ? 'var(--success)' : 'var(--danger)';
-            }
+        const qoqVal = growth[`${metric.key}_qoq`];
+        if (qoqVal !== undefined) {
+            tdQoQ.textContent = (qoqVal > 0 ? '+' : '') + qoqVal.toFixed(1) + '%';
+            tdQoQ.style.color = (metric.key === 'total_expenses' ? qoqVal <= 0 : qoqVal >= 0) ? 'var(--success)' : 'var(--danger)';
             tdQoQ.style.fontWeight = '600';
         } else {
             tdQoQ.textContent = '-';
         }
         tr.appendChild(tdQoQ);
 
-        // 3. YoY % Calculation & Cell
+        // 3. YoY %
         const tdYoY = document.createElement('td');
-        if (current && yoy && yoy[metric.key]) {
-            const diff = ((current[metric.key] - yoy[metric.key]) / Math.abs(yoy[metric.key])) * 100;
-            tdYoY.textContent = (diff > 0 ? '+' : '') + diff.toFixed(1) + '%';
-
-            // Expense Logic: Red on increase, Green on decrease
-            if (metric.key === 'total_expenses') {
-                tdYoY.style.color = diff <= 0 ? 'var(--success)' : 'var(--danger)';
-            } else {
-                tdYoY.style.color = diff >= 0 ? 'var(--success)' : 'var(--danger)';
-            }
+        const yoyVal = growth[`${metric.key}_yoy`];
+        if (yoyVal !== undefined) {
+            tdYoY.textContent = (yoyVal > 0 ? '+' : '') + yoyVal.toFixed(1) + '%';
+            tdYoY.style.color = (metric.key === 'total_expenses' ? yoyVal <= 0 : yoyVal >= 0) ? 'var(--success)' : 'var(--danger)';
             tdYoY.style.fontWeight = '600';
         } else {
             tdYoY.textContent = '-';
         }
         tr.appendChild(tdYoY);
 
-        // 4. Period Data Cells
-        tableData.forEach(col => {
+        // 4. Period Data
+        periods.forEach(p => {
             const td = document.createElement('td');
-            let val = col[metric.key];
-
-            if (metric.isPercent) {
-                td.textContent = (val || 0).toFixed(1) + '%';
-                if (val < 0) td.style.color = '#ef4444';
-                else if (val > 20) td.style.color = '#22c55e';
-            } else {
-                td.textContent = (val || 0).toLocaleString('en-IN');
-                if ((metric.key === 'operating_profit' || metric.key === 'net_profit') && val < 0) {
-                    td.style.color = '#ef4444';
-                    td.textContent = `(${Math.abs(val).toLocaleString('en-IN')})`;
+            const periodData = tableData.find(d => d.period === p);
+            if (periodData) {
+                let val = periodData[metric.key];
+                if (metric.isPercent) {
+                    td.textContent = (val || 0).toFixed(1) + '%';
+                    if (val < 0) td.style.color = '#ef4444';
+                } else {
+                    td.textContent = (val || 0).toLocaleString('en-IN');
+                    if (val < 0) {
+                        td.style.color = '#ef4444';
+                        td.textContent = `(${Math.abs(val).toLocaleString('en-IN')})`;
+                    }
                 }
+            } else {
+                td.textContent = '-';
             }
             tr.appendChild(td);
         });
@@ -344,12 +347,6 @@ function renderTable(tableData) {
 function renderObservations(observations) {
     const list = document.getElementById('observations-list');
     list.innerHTML = '';
-
-    if (!observations || observations.length === 0) {
-        list.innerHTML = '<li>No specific observations found.</li>';
-        return;
-    }
-
     observations.forEach(obs => {
         const li = document.createElement('li');
         li.textContent = obs;
